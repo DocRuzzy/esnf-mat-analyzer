@@ -1,0 +1,61 @@
+# Sample configuration for nanofiber thickness uniformity analysis
+
+# Image processing configuration
+processing:
+  # Gaussian blur kernel size (odd integer, 0 to disable)
+  blur_kernel_size: 5
+  # Contrast adjustment factor (> 1.0 to increase contrast)
+  contrast_alpha: 1.5
+  # Brightness adjustment (-255 to 255)
+  contrast_beta: 0
+  # Method for RGB to grayscale conversion ('weighted', 'average', 'luminance')
+  grayscale_conversion: weighted
+
+# Circle detection configuration
+circle_detection:
+  # Minimum radius in pixels
+  min_radius: 50
+  # Maximum radius in pixels
+  max_radius: 500
+  # Detection method ('hough' or 'contour')
+  detection_method: hough
+  # Hough transform parameters
+  param1: 50  # Higher value for fewer false detections
+  param2: 30  # Lower value for detecting more circles
+
+# Thickness estimation configuration
+thickness:
+  # Model type for brightness-to-thickness conversion ('linear', 'logarithmic', 'exponential')
+  model_type: linear
+  # Scaling factor
+  a: 1.0
+  # Offset
+  b: 0.0
+  # Pixel value threshold for considering a pixel saturated (0-255)
+  saturation_threshold: 250
+
+# Uniformity analysis configuration
+uniformity:
+  # Number of radial lines for radial uniformity analysis
+  num_radial_lines: 36
+  # Number of bins for histograms
+  bin_count: 50
+  # Factor for smoothing radial profiles (0.0 to 1.0)
+  smoothing_factor: 0.5
+
+# Visualization configuration
+visualization:
+  # Colormap for heatmaps ('viridis', 'plasma', 'inferno', 'magma', 'cividis', etc.)
+  colormap: viridis
+  # Output image resolution (DPI)
+  dpi: 300
+  # Figure size in inches (width, height)
+  figure_size: [10, 8]
+  # Whether to highlight saturated regions in visualizations
+  show_saturated: true
+
+# Output directory for analysis results
+output_dir: ./output
+
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_level: INFO
