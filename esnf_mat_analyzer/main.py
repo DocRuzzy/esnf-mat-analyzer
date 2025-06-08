@@ -12,22 +12,25 @@ import json
 from typing import Dict, Any
 
 # Import configuration and interfaces
-from nanofiber_analyzer.config.config_manager import (
+from esnf_mat_analyzer.core.data_types import ( # Changed source
     Config,
     ProcessingConfig,
     CircleDetectionConfig,
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
-    RulerDetectionConfig, # Add this
+    RulerDetectionConfig,
+    ExportConfig # Assuming ExportConfig is also in data_types.py
 )
+# Potentially, if config_manager.py had actual loading functions:
+# from nanofiber_analyzer.config.config_manager import actual_load_config_function
 
 # Import implementations
-from nanofiber_analyzer.processing.image_processor import ImageProcessor
-from nanofiber_analyzer.processing.circle_detector import CircleDetector
-from nanofiber_analyzer.processing.thickness_estimator import ThicknessEstimator
+from esnf_mat_analyzer.processing.image_processor import ImageProcessor # Corrected path
+from esnf_mat_analyzer.processing.circle_detector import CircleDetector # Corrected path
+from esnf_mat_analyzer.processing.thickness_estimator import ThicknessEstimator # Corrected path
 from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
-from nanofiber_analyzer.analysis.radial_uniformity import RadialUniformityIndex
+from esnf_mat_analyzer.analysis.radial_uniformity import RadialUniformityIndex # Corrected path
 from nanofiber_analyzer.analysis.gini_coefficient import GiniCoefficient
 from nanofiber_analyzer.analysis.thickness_ratio import ThicknessRangeRatio
 from nanofiber_analyzer.visualization.visualizer import Visualizer
@@ -119,6 +122,14 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         hough_threshold=config_data.get("ruler_detection", {}).get("hough_threshold", 20),
     )
 
+    # Create export config
+    export_config = ExportConfig(
+        csv_delimiter=config_data.get("export", {}).get("csv_delimiter", ","),
+        export_formats=config_data.get("export", {}).get("export_formats", ["csv", "json", "txt"]),
+        compress_outputs=config_data.get("export", {}).get("compress_outputs", False),
+        include_metadata=config_data.get("export", {}).get("include_metadata", True),
+    )
+
     # Create main config
     config = Config(
         processing=processing_config,
@@ -126,7 +137,8 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
-        ruler_detection=ruler_detection_config, # Add this
+        ruler_detection=ruler_detection_config,
+        export=export_config, # Added export_config
         output_dir=Path(config_data.get("output_dir", "./output")),
         log_level=getattr(logging, config_data.get("log_level", "INFO")),
     )
@@ -159,7 +171,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
 
     # Create visualizer and data exporter
     visualizer = Visualizer(config.visualization)
-    data_exporter = DataExporter()
+    data_exporter = DataExporter(config.export) # Pass export config
 
     # Create main analyzer
     analyzer = NanoFiberAnalyzer(
@@ -167,7 +179,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
         image_processor=image_processor,
         circle_detector=circle_detector,
         thickness_estimator=thickness_estimator,
-        ruler_detector=ruler_detector, # Added here
+        ruler_detector=ruler_detector,
         uniformity_metrics=uniformity_metrics,
         visualizer=visualizer,
         data_exporter=data_exporter,
@@ -226,6 +238,12 @@ def generate_default_config(output_path: Path) -> None:
             "canny_threshold1": config.ruler_detection.canny_threshold1,
             "canny_threshold2": config.ruler_detection.canny_threshold2,
             "hough_threshold": config.ruler_detection.hough_threshold,
+        },
+        "export": {
+            "csv_delimiter": config.export.csv_delimiter,
+            "export_formats": config.export.export_formats,
+            "compress_outputs": config.export.compress_outputs,
+            "include_metadata": config.export.include_metadata,
         },
         "output_dir": str(config.output_dir),
         "log_level": logging.getLevelName(config.log_level),

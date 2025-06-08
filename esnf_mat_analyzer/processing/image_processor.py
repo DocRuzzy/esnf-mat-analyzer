@@ -1,215 +1,168 @@
-"""
-Tests for the ImageProcessor class.
-
-This module contains unit tests for the ImageProcessor class to ensure
-it correctly loads and preprocesses images for nanofiber analysis.
-"""
-
-import pytest
-import numpy as np
-import tempfile
-import os
-from pathlib import Path
 import cv2
+import numpy as np
+import logging
+from pathlib import Path
+from typing import Dict, Any
+import time # Added for save_debug_image
 
-from esnf_mat_analyzer.core.data_types import (
-    ProcessingConfig,
-    GrayscaleConversionMethod,
-)
-from esnf_mat_analyzer.processing.image_processor import ImageProcessor
+from ..core.interfaces import ImageProcessorInterface
+from ..core.data_types import ProcessingConfig, GrayscaleConversionMethod, Image
+
+class ImageProcessor(ImageProcessorInterface):
+    """
+    Handles image loading and preprocessing operations.
+    """
+
+    def __init__(self, config: ProcessingConfig):
+        """
+        Initialize the ImageProcessor.
+
+        Args:
+            config: Configuration for image processing.
+        """
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"ImageProcessor initialized with config: {self.config}")
+
+    def load_image(self, path: Path) -> Image:
+        """
+        Load an image from the specified path. Converts to RGB.
+
+        Args:
+            path: Path to the image file.
+
+        Returns:
+            Loaded image as a numpy array (RGB).
+
+        Raises:
+            FileNotFoundError: If the image file does not exist.
+            ValueError: If the image cannot be loaded or is invalid.
+        """
+        if not path.exists():
+            self.logger.error(f"Image file not found at {path}")
+            raise FileNotFoundError(f"Image file not found at {path}")
+
+        try:
+            image = cv2.imread(str(path))
+            if image is None:
+                self.logger.error(f"Failed to load image from {path} (cv2.imread returned None).")
+                raise ValueError(f"Failed to load image from {path}. File might be corrupted or an unsupported format.")
+
+            # Convert BGR (OpenCV default) to RGB for consistency
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            self.logger.debug(f"Image loaded from {path}, shape: {image_rgb.shape}")
+            return image_rgb
+        except Exception as e:
+            self.logger.error(f"Error loading image {path}: {e}", exc_info=True)
+            raise ValueError(f"Error loading image {path}: {e}")
 
 
-class TestImageProcessor:
-    """Test suite for the ImageProcessor class."""
+    def _apply_grayscale(self, image: Image) -> Image:
+        """Applies grayscale conversion based on config."""
+        if len(image.shape) == 2: # Already grayscale
+            return image
+        if image.shape[2] != 3: # Not a 3-channel color image
+             self.logger.warning("Cannot apply grayscale to non-3-channel image. Returning as is.")
+             return image
 
-    @pytest.fixture
-    def test_image_path(self):
-        """Create a temporary test image and return its path."""
-        # Create a temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Create a simple test image (black with white circle)
-            image = np.zeros((200, 200, 3), dtype=np.uint8)
-            # Draw white circle in the center
-            cv2.circle(image, (100, 100), 50, (255, 255, 255), -1)
-            # Save the image
-            image_path = Path(temp_dir) / "test_image.png"
-            cv2.imwrite(str(image_path), image)
+        method = self.config.grayscale_conversion
+        if method == GrayscaleConversionMethod.WEIGHTED:
+            # Standard RGB to Grayscale conversion: Y = 0.299R + 0.587G + 0.114B
+            gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        elif method == GrayscaleConversionMethod.AVERAGE:
+            gray_image = np.mean(image, axis=2).astype(np.uint8)
+        elif method == GrayscaleConversionMethod.LUMINANCE: # Perceptual luminance (closer to human perception)
+            # Using a common formula, slightly different from OpenCV's default weighted
+            gray_image = (0.2126 * image[:,:,0] + 0.7152 * image[:,:,1] + 0.0722 * image[:,:,2]).astype(np.uint8)
+        else:
+            self.logger.warning(f"Unknown grayscale method: {method}. Defaulting to WEIGHTED.")
+            gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        self.logger.debug(f"Applied grayscale conversion using {method}.")
+        return gray_image
 
-            yield image_path
+    def _apply_blur(self, image: Image) -> Image:
+        """Applies Gaussian blur based on config."""
+        kernel_size = self.config.blur_kernel_size
+        if kernel_size > 0:
+            # Ensure kernel size is odd
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            blurred_image = cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+            self.logger.debug(f"Applied Gaussian blur with kernel size {kernel_size}.")
+            return blurred_image
+        return image
 
-    @pytest.fixture
-    def default_config(self):
-        """Return a default processing configuration."""
-        return ProcessingConfig()
+    def _apply_contrast_brightness(self, image: Image) -> Image:
+        """Applies contrast and brightness adjustment based on config."""
+        alpha = self.config.contrast_alpha  # Contrast control (1.0-3.0)
+        beta = self.config.contrast_beta    # Brightness control (0-100)
 
-    def test_load_image(self, test_image_path, default_config):
-        """Test that images can be loaded correctly."""
-        processor = ImageProcessor(default_config)
-        image = processor.load_image(test_image_path)
+        # cv2.convertScaleAbs performs: output = saturate_cast(alpha * input + beta)
+        # It handles saturation to 0-255 range.
+        adjusted_image = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+        self.logger.debug(f"Applied contrast (alpha={alpha}) and brightness (beta={beta}).")
+        return adjusted_image
 
-        # Check that the image was loaded with the right dimensions and type
-        assert isinstance(image, np.ndarray)
-        assert image.shape == (200, 200, 3)
-        assert image.dtype == np.uint8
+    def preprocess(self, image: Image) -> Image:
+        """
+        Preprocess the image for analysis.
+        Applies grayscale, blur, and contrast adjustments based on config.
+        Input image is expected to be RGB.
+        Output image is grayscale.
+        """
+        self.logger.debug("Starting image preprocessing.")
 
-        # Check that the image was converted to RGB (white circle should be white in RGB)
-        assert np.array_equal(image[100, 100], [255, 255, 255])
+        # 1. Grayscale conversion
+        processed_image = self._apply_grayscale(image)
 
-    def test_load_image_nonexistent(self, default_config):
-        """Test that loading a non-existent image raises an error."""
-        processor = ImageProcessor(default_config)
-        with pytest.raises(FileNotFoundError):
-            processor.load_image(Path("nonexistent_image.png"))
+        # 2. Blur
+        processed_image = self._apply_blur(processed_image)
 
-    def test_preprocess_with_default_config(self, test_image_path, default_config):
-        """Test image preprocessing with default configuration."""
-        processor = ImageProcessor(default_config)
-        image = processor.load_image(test_image_path)
-        preprocessed = processor.preprocess(image)
+        # 3. Contrast/Brightness (on grayscale image)
+        processed_image = self._apply_contrast_brightness(processed_image)
 
-        # Check that the output is grayscale
-        assert len(preprocessed.shape) == 2
-        assert preprocessed.dtype == np.uint8
+        self.logger.info("Image preprocessing complete.")
+        return processed_image
 
-        # Center should be white (255)
-        assert preprocessed[100, 100] == 255
-        # Corner should be black (0)
-        assert preprocessed[0, 0] == 0
+    def analyze_image_properties(self, image: Image) -> Dict[str, Any]:
+        """Analyzes and returns basic properties of the image."""
+        properties = {}
+        properties["shape"] = image.shape
+        properties["dtype"] = str(image.dtype)
 
-    def test_grayscale_conversion_methods(self, test_image_path):
-        """Test different grayscale conversion methods."""
-        # Create a color image with different colors
-        image = np.zeros((100, 100, 3), dtype=np.uint8)
-        # Red square
-        image[0:50, 0:50] = [255, 0, 0]
-        # Green square
-        image[0:50, 50:100] = [0, 255, 0]
-        # Blue square
-        image[50:100, 0:50] = [0, 0, 255]
-        # White square
-        image[50:100, 50:100] = [255, 255, 255]
+        if len(image.shape) == 3:
+            properties["channels"] = image.shape[2]
+        elif len(image.shape) == 2:
+            properties["channels"] = 1
+        else:
+            properties["channels"] = "Unknown"
 
-        # Save the image
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "color_test.png"
-            cv2.imwrite(str(image_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        properties["min_value"] = int(np.min(image))
+        properties["max_value"] = int(np.max(image))
+        properties["mean_value"] = float(np.mean(image))
+        properties["std_deviation"] = float(np.std(image))
 
-            # Test weighted method
-            weighted_config = ProcessingConfig(
-                grayscale_conversion=GrayscaleConversionMethod.WEIGHTED
-            )
-            weighted_processor = ImageProcessor(weighted_config)
-            weighted_image = weighted_processor.load_image(image_path)
-            weighted_gray = weighted_processor.preprocess(weighted_image)
+        self.logger.debug(f"Analyzed image properties: {properties}")
+        return properties
 
-            # Test average method
-            average_config = ProcessingConfig(
-                grayscale_conversion=GrayscaleConversionMethod.AVERAGE
-            )
-            average_processor = ImageProcessor(average_config)
-            average_image = average_processor.load_image(image_path)
-            average_gray = average_processor.preprocess(average_image)
+    def save_debug_image(self, image: Image, output_dir: Path, prefix: str) -> Path:
+        """Saves an image to the debug directory for inspection."""
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Test luminance method
-            luminance_config = ProcessingConfig(
-                grayscale_conversion=GrayscaleConversionMethod.LUMINANCE
-            )
-            luminance_processor = ImageProcessor(luminance_config)
-            luminance_image = luminance_processor.load_image(image_path)
-            luminance_gray = luminance_processor.preprocess(luminance_image)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        filename = f"{prefix}_{timestamp}.png"
+        filepath = output_dir / filename
 
-            # Verify that the methods produce different results
-            # Red square should be darker in luminance method than in average method
-            assert luminance_gray[25, 25] < average_gray[25, 25]
-            # Green square should be brighter in luminance method than red square
-            assert luminance_gray[25, 75] > luminance_gray[25, 25]
-            # White square should be white in all methods
-            assert weighted_gray[75, 75] > 240
-            assert average_gray[75, 75] > 240
-            assert luminance_gray[75, 75] > 240
-
-    def test_blur_and_contrast(self, test_image_path):
-        """Test blur and contrast adjustments."""
-        # Load the original image
-        default_processor = ImageProcessor(ProcessingConfig())
-        original = default_processor.load_image(test_image_path)
-
-        # Create a configuration with strong blur
-        blur_config = ProcessingConfig(blur_kernel_size=15)
-        blur_processor = ImageProcessor(blur_config)
-        blurred = blur_processor.preprocess(original)
-
-        # Create a configuration with increased contrast
-        contrast_config = ProcessingConfig(contrast_alpha=2.0)
-        contrast_processor = ImageProcessor(contrast_config)
-        contrasted = contrast_processor.preprocess(original)
-
-        # Create a configuration with no blur
-        no_blur_config = ProcessingConfig(blur_kernel_size=0)
-        no_blur_processor = ImageProcessor(no_blur_config)
-        no_blur = no_blur_processor.preprocess(original)
-
-        # Verify that blur reduces edge sharpness
-        # Calculate edge strength using Sobel operator
-        blurred_edges = cv2.Sobel(blurred, cv2.CV_64F, 1, 1, ksize=3)
-        no_blur_edges = cv2.Sobel(no_blur, cv2.CV_64F, 1, 1, ksize=3)
-
-        # Blurred image should have weaker edges
-        assert np.max(np.abs(blurred_edges)) < np.max(np.abs(no_blur_edges))
-
-        # Verify that increased contrast enhances the difference between black and white
-        default = default_processor.preprocess(original)
-
-        # Standard deviation should be higher with increased contrast
-        assert np.std(contrasted) > np.std(default)
-
-    def test_analyze_image_properties(self, test_image_path, default_config):
-        """Test the image property analysis function."""
-        processor = ImageProcessor(default_config)
-        image = processor.load_image(test_image_path)
-
-        properties = processor.analyze_image_properties(image)
-
-        # Check that all expected properties are present
-        expected_keys = [
-            "shape",
-            "dtype",
-            "channels",
-            "min_value",
-            "max_value",
-            "mean_value",
-            "std_deviation",
-        ]
-        for key in expected_keys:
-            assert key in properties
-
-        # Check specific property values
-        assert properties["shape"] == (200, 200, 3)
-        assert properties["channels"] == 3
-        assert properties["min_value"] == 0
-        assert properties["max_value"] == 255
-
-        # Test with grayscale image
-        gray_image = processor.preprocess(image)
-        gray_properties = processor.analyze_image_properties(gray_image)
-
-        assert gray_properties["channels"] == 1
-        assert gray_properties["shape"] == (200, 200)
-
-    def test_save_debug_image(self, test_image_path, default_config):
-        """Test saving debug images."""
-        processor = ImageProcessor(default_config)
-        image = processor.load_image(test_image_path)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir)
-            processor.save_debug_image(image, output_path, prefix="test")
-
-            # Check that a file was created
-            files = list(output_path.glob("test_*.png"))
-            assert len(files) == 1
-
-            # Verify the saved image can be loaded
-            saved_image = cv2.imread(str(files[0]))
-            assert saved_image is not None
-            assert saved_image.shape == (200, 200, 3)
+        try:
+            # If image is RGB, convert to BGR for OpenCV imwrite
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                image_to_save = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            else: # Grayscale or other, save as is
+                image_to_save = image
+            cv2.imwrite(str(filepath), image_to_save)
+            self.logger.info(f"Saved debug image to {filepath}")
+            return filepath
+        except Exception as e:
+            self.logger.error(f"Failed to save debug image {filepath}: {e}", exc_info=True)
+            raise

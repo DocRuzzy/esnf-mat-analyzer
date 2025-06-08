@@ -299,6 +299,8 @@ class AnalysisResult:
     radial_profile: Optional[RadialProfile] = None
     """Radial profile data if calculated."""
 
+    spatial_scale_pixels_per_mm: Optional[float] = None # <<< NEW FIELD
+
     results_dir: Optional[Path] = None
     """Directory containing result files."""
 
@@ -310,5 +312,7 @@ class AnalysisResult:
 
     def __post_init__(self):
         """Validate the analysis result."""
-        if self.thickness_map.shape != self.mask.shape:
+        if hasattr(self, 'thickness_map') and hasattr(self, 'mask') and \
+               self.thickness_map.shape != self.mask.shape:
+                # Check existence of attributes because of potential partial mock objects in tests
             raise ValueError("Thickness map and mask must have the same shape")
