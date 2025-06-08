@@ -19,12 +19,14 @@ from nanofiber_analyzer.config.config_manager import (
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
+    RulerDetectionConfig, # Add this
 )
 
 # Import implementations
 from nanofiber_analyzer.processing.image_processor import ImageProcessor
 from nanofiber_analyzer.processing.circle_detector import CircleDetector
 from nanofiber_analyzer.processing.thickness_estimator import ThicknessEstimator
+from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
 from nanofiber_analyzer.analysis.radial_uniformity import RadialUniformityIndex
 from nanofiber_analyzer.analysis.gini_coefficient import GiniCoefficient
 from nanofiber_analyzer.analysis.thickness_ratio import ThicknessRangeRatio
@@ -106,6 +108,17 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         show_saturated=config_data.get("visualization", {}).get("show_saturated", True),
     )
 
+    # Create ruler detection config
+    ruler_detection_config = RulerDetectionConfig(
+        enabled=config_data.get("ruler_detection", {}).get("enabled", True),
+        min_line_length=config_data.get("ruler_detection", {}).get("min_line_length", 50),
+        max_line_gap=config_data.get("ruler_detection", {}).get("max_line_gap", 10),
+        expected_tick_distance_mm=config_data.get("ruler_detection", {}).get("expected_tick_distance_mm", 1.0),
+        canny_threshold1=config_data.get("ruler_detection", {}).get("canny_threshold1", 50),
+        canny_threshold2=config_data.get("ruler_detection", {}).get("canny_threshold2", 150),
+        hough_threshold=config_data.get("ruler_detection", {}).get("hough_threshold", 20),
+    )
+
     # Create main config
     config = Config(
         processing=processing_config,
@@ -113,6 +126,7 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
+        ruler_detection=ruler_detection_config, # Add this
         output_dir=Path(config_data.get("output_dir", "./output")),
         log_level=getattr(logging, config_data.get("log_level", "INFO")),
     )
@@ -134,6 +148,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
     image_processor = ImageProcessor(config.processing)
     circle_detector = CircleDetector(config.circle_detection)
     thickness_estimator = ThicknessEstimator(config.thickness)
+    ruler_detector = RulerDetector(config.ruler_detection) # Modified
 
     # Create uniformity metrics
     uniformity_metrics = [
@@ -152,6 +167,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
         image_processor=image_processor,
         circle_detector=circle_detector,
         thickness_estimator=thickness_estimator,
+        ruler_detector=ruler_detector, # Added here
         uniformity_metrics=uniformity_metrics,
         visualizer=visualizer,
         data_exporter=data_exporter,
@@ -201,6 +217,15 @@ def generate_default_config(output_path: Path) -> None:
             "dpi": config.visualization.dpi,
             "figure_size": config.visualization.figure_size,
             "show_saturated": config.visualization.show_saturated,
+        },
+        "ruler_detection": {
+            "enabled": config.ruler_detection.enabled,
+            "min_line_length": config.ruler_detection.min_line_length,
+            "max_line_gap": config.ruler_detection.max_line_gap,
+            "expected_tick_distance_mm": config.ruler_detection.expected_tick_distance_mm,
+            "canny_threshold1": config.ruler_detection.canny_threshold1,
+            "canny_threshold2": config.ruler_detection.canny_threshold2,
+            "hough_threshold": config.ruler_detection.hough_threshold,
         },
         "output_dir": str(config.output_dir),
         "log_level": logging.getLevelName(config.log_level),

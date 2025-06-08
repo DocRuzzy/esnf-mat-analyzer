@@ -157,6 +157,32 @@ class VisualizationConfig:
 
 
 @dataclass
+class RulerDetectionConfig:
+    """Configuration parameters for ruler detection and scale calibration."""
+
+    enabled: bool = True
+    """Enable or disable ruler detection."""
+
+    min_line_length: int = 50
+    """Minimum length of lines to be considered part of a ruler (in pixels)."""
+
+    max_line_gap: int = 10
+    """Maximum allowed gap between line segments to treat them as a single line."""
+
+    expected_tick_distance_mm: float = 1.0
+    """The expected real-world distance between major ticks being searched for (e.g., 1mm, 5mm, 10mm)."""
+
+    canny_threshold1: int = 50
+    """First threshold for the Canny edge detector."""
+
+    canny_threshold2: int = 150
+    """Second threshold for the Canny edge detector."""
+
+    hough_threshold: int = 20
+    """Accumulator threshold parameter for Hough Line Transform."""
+
+
+@dataclass
 class ExportConfig:
     """Configuration parameters for data export."""
 
@@ -193,6 +219,9 @@ class Config:
 
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     """Visualization configuration."""
+
+    ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
+    """Ruler detection configuration."""
 
     export: ExportConfig = field(default_factory=ExportConfig)
     """Export configuration."""
