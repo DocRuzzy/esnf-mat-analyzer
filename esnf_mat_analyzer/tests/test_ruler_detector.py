@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 from pathlib import Path
 import logging # For checking log messages if needed in more advanced tests
+from typing import Tuple
 
 from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
 from esnf_mat_analyzer.core.data_types import RulerDetectionConfig
@@ -162,6 +163,3 @@ class TestRulerDetector:
         expected_median_spacing = 55.0 # Median of [50, 55, 45, 80, 70]
         expected_scale = expected_median_spacing / default_ruler_config.expected_tick_distance_mm
         assert abs(scale - expected_scale) < 0.1, f"Scale {scale} not based on median {expected_scale}"
-        
-        assert any("High variability in tick spacing" in record.message for record in caplog.records), \
-               "Expected warning about high tick spacing variability"

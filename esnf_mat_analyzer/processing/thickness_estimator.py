@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from esnf_mat_analyzer.core.interfaces import ThicknessEstimatorInterface
-from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType, Mask, ThicknessMap, Image
+from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType
 
 class ThicknessEstimator(ThicknessEstimatorInterface):
     """
@@ -22,7 +22,7 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ThicknessEstimator initialized with config: {self.config}")
 
-    def estimate(self, image: Image, mask: Mask) -> ThicknessMap:
+    def estimate(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
         Estimate thickness from image brightness.
 
@@ -86,7 +86,7 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         self.logger.debug("Thickness estimation complete.")
         return thickness_map.astype(np.float32) # Ensure float output
 
-    def get_saturation_mask(self, image: Image, mask: Mask) -> Mask:
+    def get_saturation_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
         Create a mask of saturated pixels.
         Pixels are considered saturated if their brightness value is at or above

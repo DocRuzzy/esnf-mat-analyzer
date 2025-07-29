@@ -22,13 +22,6 @@ class GrayscaleConversionMethod(Enum):
     LUMINANCE = auto()  # Perceptual luminance-preserving conversion
 
 
-class CircleDetectionMethod(Enum):
-    """Methods for detecting circular regions in images."""
-
-    HOUGH = auto()  # Hough Circle Transform
-    CONTOUR = auto()  # Contour-based detection
-
-
 class ThicknessModelType(Enum):
     """Models for converting brightness to thickness."""
 
@@ -52,33 +45,6 @@ class ProcessingConfig:
 
     grayscale_conversion: GrayscaleConversionMethod = GrayscaleConversionMethod.WEIGHTED
     """Method used for converting RGB images to grayscale."""
-
-
-@dataclass
-class CircleDetectionConfig:
-    """Configuration parameters for circle detection."""
-
-    min_radius: int = 50
-    """Minimum radius in pixels to be detected."""
-
-    max_radius: int = 500
-    """Maximum radius in pixels to be detected."""
-
-    detection_method: CircleDetectionMethod = CircleDetectionMethod.HOUGH
-    """Method used for detecting circles."""
-
-    param1: int = 50
-    """Parameter 1 for Hough Transform (higher value for fewer false detections)."""
-
-    param2: int = 30
-    """Parameter 2 for Hough Transform (lower value detects more circles)."""
-
-    # Additional parameters for contour-based detection
-    min_area: int = 1000
-    """Minimum area in pixels² for contour-based detection."""
-
-    max_area: int = 1000000
-    """Maximum area in pixels² for contour-based detection."""
 
 
 @dataclass
@@ -206,11 +172,6 @@ class Config:
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     """Image processing configuration."""
 
-    circle_detection: CircleDetectionConfig = field(
-        default_factory=CircleDetectionConfig
-    )
-    """Circle detection configuration."""
-
     thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
     """Thickness estimation configuration."""
 
@@ -278,11 +239,8 @@ class AnalysisResult:
     image_path: Path
     """Path to the original image."""
 
-    center: Tuple[int, int]
-    """Detected center coordinates (x, y)."""
-
-    radius: int
-    """Detected radius."""
+    contour: np.ndarray
+    """Detected contour of the mat."""
 
     thickness_map: np.ndarray
     """Estimated thickness map."""

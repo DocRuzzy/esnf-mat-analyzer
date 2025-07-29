@@ -41,23 +41,34 @@ class RadialUniformityIndex(UniformityMetricInterface):
         return ("Measures thickness variation along radial lines from the center. "
                 "Values closer to 1.0 indicate better uniformity.")
     
-    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, center: Tuple[int, int]) -> float:
+    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, contour: np.ndarray) -> float:
         """
         Calculate the Radial Uniformity Index.
         
         Args:
             thickness_map: 2D thickness map
             mask: Binary mask indicating the region of interest
-            center: Center coordinates (x, y) of the circular region
+            contour: The contour of the shape.
             
         Returns:
             Radial Uniformity Index (0-1, higher is more uniform)
         """
         self.logger.debug("Calculating Radial Uniformity Index")
+
+        if contour is None:
+            self.logger.warning("Contour is None, cannot calculate Radial Uniformity Index.")
+            return 0.0
+
+        # Calculate the centroid of the contour
+        M = cv2.moments(contour)
+        if M["m00"] == 0:
+            self.logger.warning("Contour has zero area, cannot calculate centroid.")
+            return 0.0
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
         
         # Extract dimensions
         height, width = thickness_map.shape
-        cx, cy = center
         
         # Create angles for radial lines
         angles = np.linspace(0, 2*np.pi, self.config.num_radial_lines, endpoint=False)
@@ -155,14 +166,14 @@ class GiniCoefficient(UniformityMetricInterface):
         return ("Measures statistical dispersion as thickness inequality. "
                 "Values closer to 0 indicate better uniformity (more equal distribution).")
     
-    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, center: Tuple[int, int]) -> float:
+    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, contour: np.ndarray) -> float:
         """
         Calculate the Gini Coefficient.
         
         Args:
             thickness_map: 2D thickness map
             mask: Binary mask indicating the region of interest
-            center: Center coordinates (not used for this calculation)
+            contour: The contour of the shape (not used for this calculation).
             
         Returns:
             Gini coefficient (0-1, lower is more uniform)
@@ -215,14 +226,14 @@ class ThicknessRangeRatio(UniformityMetricInterface):
         return ("Ratio of minimum to maximum thickness. "
                 "Values closer to 1.0 indicate better uniformity.")
     
-    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, center: Tuple[int, int]) -> float:
+    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, contour: np.ndarray) -> float:
         """
         Calculate the Thickness Range Ratio (min/max).
         
         Args:
             thickness_map: 2D thickness map
             mask: Binary mask indicating the region of interest
-            center: Center coordinates (not used for this calculation)
+            contour: The contour of the shape (not used for this calculation).
             
         Returns:
             Thickness Range Ratio (0-1, higher is more uniform)

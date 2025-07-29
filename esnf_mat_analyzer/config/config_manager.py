@@ -16,13 +16,11 @@ import argparse
 from esnf_mat_analyzer.core.data_types import (
     Config,
     ProcessingConfig,
-    CircleDetectionConfig,
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
     ExportConfig,
     GrayscaleConversionMethod,
-    CircleDetectionMethod,
     ThicknessModelType,
 )
 
@@ -34,11 +32,6 @@ GRAYSCALE_METHOD_MAP = {
     "weighted": GrayscaleConversionMethod.WEIGHTED,
     "average": GrayscaleConversionMethod.AVERAGE,
     "luminance": GrayscaleConversionMethod.LUMINANCE,
-}
-
-CIRCLE_DETECTION_METHOD_MAP = {
-    "hough": CircleDetectionMethod.HOUGH,
-    "contour": CircleDetectionMethod.CONTOUR,
 }
 
 THICKNESS_MODEL_MAP = {
@@ -63,11 +56,6 @@ def enum_to_str(enum_value: Any) -> str:
             GrayscaleConversionMethod.WEIGHTED: "weighted",
             GrayscaleConversionMethod.AVERAGE: "average",
             GrayscaleConversionMethod.LUMINANCE: "luminance",
-        }[enum_value]
-    elif isinstance(enum_value, CircleDetectionMethod):
-        return {
-            CircleDetectionMethod.HOUGH: "hough",
-            CircleDetectionMethod.CONTOUR: "contour",
         }[enum_value]
     elif isinstance(enum_value, ThicknessModelType):
         return {
@@ -101,14 +89,6 @@ def str_to_enum(string_value: str, enum_type: Any) -> Any:
                 f"Valid values are: {valid_values}"
             )
         return GRAYSCALE_METHOD_MAP[string_value.lower()]
-    elif enum_type == CircleDetectionMethod:
-        if string_value.lower() not in CIRCLE_DETECTION_METHOD_MAP:
-            valid_values = ", ".join(CIRCLE_DETECTION_METHOD_MAP.keys())
-            raise ValueError(
-                f"Invalid circle detection method: {string_value}. "
-                f"Valid values are: {valid_values}"
-            )
-        return CIRCLE_DETECTION_METHOD_MAP[string_value.lower()]
     elif enum_type == ThicknessModelType:
         if string_value.lower() not in THICKNESS_MODEL_MAP:
             valid_values = ", ".join(THICKNESS_MODEL_MAP.keys())
@@ -137,16 +117,6 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
         "contrast_alpha": config.processing.contrast_alpha,
         "contrast_beta": config.processing.contrast_beta,
         "grayscale_conversion": enum_to_str(config.processing.grayscale_conversion),
-    }
-
-    circle_detection_dict = {
-        "min_radius": config.circle_detection.min_radius,
-        "max_radius": config.circle_detection.max_radius,
-        "detection_method": enum_to_str(config.circle_detection.detection_method),
-        "param1": config.circle_detection.param1,
-        "param2": config.circle_detection.param2,
-        "min_area": config.circle_detection.min_area,
-        "max_area": config.circle_detection.max_area,
     }
 
     thickness_dict = {
@@ -188,7 +158,6 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
     # Combine into main config dictionary
     config_dict = {
         "processing": processing_dict,
-        "circle_detection": circle_detection_dict,
         "thickness": thickness_dict,
         "uniformity": uniformity_dict,
         "visualization": visualization_dict,
@@ -216,7 +185,6 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
     """
     # Create individual config components with default values
     processing_config = ProcessingConfig()
-    circle_detection_config = CircleDetectionConfig()
     thickness_config = ThicknessConfig()
     uniformity_config = UniformityConfig()
     visualization_config = VisualizationConfig()
@@ -235,25 +203,6 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
             processing_config.grayscale_conversion = str_to_enum(
                 proc_dict["grayscale_conversion"], GrayscaleConversionMethod
             )
-
-    if "circle_detection" in config_dict:
-        circ_dict = config_dict["circle_detection"]
-        if "min_radius" in circ_dict:
-            circle_detection_config.min_radius = int(circ_dict["min_radius"])
-        if "max_radius" in circ_dict:
-            circle_detection_config.max_radius = int(circ_dict["max_radius"])
-        if "detection_method" in circ_dict:
-            circle_detection_config.detection_method = str_to_enum(
-                circ_dict["detection_method"], CircleDetectionMethod
-            )
-        if "param1" in circ_dict:
-            circle_detection_config.param1 = int(circ_dict["param1"])
-        if "param2" in circ_dict:
-            circle_detection_config.param2 = int(circ_dict["param2"])
-        if "min_area" in circ_dict:
-            circle_detection_config.min_area = int(circ_dict["min_area"])
-        if "max_area" in circ_dict:
-            circle_detection_config.max_area = int(circ_dict["max_area"])
 
     if "thickness" in config_dict:
         thick_dict = config_dict["thickness"]
@@ -359,7 +308,6 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
     # Create main Config object
     config = Config(
         processing=processing_config,
-        circle_detection=circle_detection_config,
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
@@ -467,25 +415,6 @@ def validate_config(config: Config) -> List[str]:
 
     if config.processing.contrast_beta < -255 or config.processing.contrast_beta > 255:
         errors.append("contrast_beta must be between -255 and 255")
-
-    # Validate CircleDetectionConfig
-    if config.circle_detection.min_radius <= 0:
-        errors.append("min_radius must be positive")
-
-    if config.circle_detection.max_radius <= config.circle_detection.min_radius:
-        errors.append("max_radius must be greater than min_radius")
-
-    if config.circle_detection.param1 <= 0:
-        errors.append("param1 must be positive")
-
-    if config.circle_detection.param2 <= 0:
-        errors.append("param2 must be positive")
-
-    if config.circle_detection.min_area <= 0:
-        errors.append("min_area must be positive")
-
-    if config.circle_detection.max_area <= config.circle_detection.min_area:
-        errors.append("max_area must be greater than min_area")
 
     # Validate ThicknessConfig
     if (

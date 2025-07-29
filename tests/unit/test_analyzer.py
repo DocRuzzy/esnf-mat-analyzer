@@ -6,15 +6,16 @@ import numpy as np # For dummy image data if needed by mocks
 # Classes to be tested or used in type hints
 from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
 from esnf_mat_analyzer.core.data_types import (
-    Config, AnalysisResult, Point, ProcessingConfig, CircleDetectionConfig,
+    Config, AnalysisResult, ProcessingConfig,
     ThicknessConfig, UniformityConfig, VisualizationConfig, ExportConfig,
     RulerDetectionConfig
 )
 # Interfaces for mocking
 from esnf_mat_analyzer.core.interfaces import (
-    ImageProcessorInterface, CircleDetectorInterface, ThicknessEstimatorInterface,
+    ImageProcessorInterface, ThicknessEstimatorInterface,
     UniformityMetricInterface, VisualizerInterface, DataExporterInterface
 )
+from esnf_mat_analyzer.processing.shape_detector import ShapeDetector
 from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
 
 
@@ -23,7 +24,6 @@ def mock_config() -> Config:
     """Returns a default mock Config object."""
     return Config(
         processing=ProcessingConfig(),
-        circle_detection=CircleDetectionConfig(),
         thickness=ThicknessConfig(),
         uniformity=UniformityConfig(),
         visualization=VisualizationConfig(),
@@ -42,9 +42,9 @@ def mock_image_processor() -> MagicMock:
     return mock
 
 @pytest.fixture
-def mock_circle_detector() -> MagicMock:
-    mock = MagicMock(spec=CircleDetectorInterface)
-    mock.detect.return_value = ((50, 50), 40) # center (Point), radius (int)
+def mock_shape_detector() -> MagicMock:
+    mock = MagicMock(spec=ShapeDetector)
+    mock.detect.return_value = np.array([[[0, 0]], [[0, 100]], [[100, 100]], [[100, 0]]]) # Dummy contour
     mock.create_mask.return_value = np.ones((100, 100), dtype=np.uint8) # Dummy mask
     return mock
 
@@ -77,14 +77,14 @@ def mock_data_exporter() -> MagicMock:
     return MagicMock(spec=DataExporterInterface)
 
 @pytest.fixture
-def analyzer(mock_config, mock_image_processor, mock_circle_detector,
+def analyzer(mock_config, mock_image_processor, mock_shape_detector,
              mock_thickness_estimator, mock_ruler_detector,
              mock_uniformity_metric, mock_visualizer, mock_data_exporter) -> NanoFiberAnalyzer:
     """Fixture to create NanoFiberAnalyzer with mocked dependencies."""
     return NanoFiberAnalyzer(
         config=mock_config,
         image_processor=mock_image_processor,
-        circle_detector=mock_circle_detector,
+        shape_detector=mock_shape_detector,
         thickness_estimator=mock_thickness_estimator,
         ruler_detector=mock_ruler_detector,
         uniformity_metrics=[mock_uniformity_metric],
@@ -100,7 +100,7 @@ class TestNanoFiberAnalyzer:
         assert analyzer.logger is not None
 
     def test_process_image_successful_flow(self, analyzer: NanoFiberAnalyzer, mock_image_processor: MagicMock,
-                                           mock_ruler_detector: MagicMock, mock_circle_detector: MagicMock,
+                                           mock_ruler_detector: MagicMock, mock_shape_detector: MagicMock,
                                            mock_thickness_estimator: MagicMock, mock_uniformity_metric: MagicMock):
         """Test the successful processing flow of a single image."""
         test_image_path = Path("dummy_image.png")
@@ -111,8 +111,8 @@ class TestNanoFiberAnalyzer:
         mock_image_processor.load_image.assert_called_once_with(test_image_path)
         mock_ruler_detector.detect_scale.assert_called_once_with(mock_image_processor.load_image.return_value)
         mock_image_processor.preprocess.assert_called_once_with(mock_image_processor.load_image.return_value)
-        mock_circle_detector.detect.assert_called_once_with(mock_image_processor.preprocess.return_value)
-        mock_circle_detector.create_mask.assert_called_once()
+        mock_shape_detector.detect.assert_called_once_with(mock_image_processor.preprocess.return_value)
+        mock_shape_detector.create_mask.assert_called_once()
         mock_thickness_estimator.estimate.assert_called_once()
         mock_thickness_estimator.get_saturation_mask.assert_called_once()
         mock_uniformity_metric.calculate.assert_called_once()
@@ -122,8 +122,7 @@ class TestNanoFiberAnalyzer:
         assert result.image_path == test_image_path
         assert result.metrics[mock_uniformity_metric.name] == mock_uniformity_metric.calculate.return_value
         assert result.spatial_scale_pixels_per_mm == mock_ruler_detector.detect_scale.return_value
-        assert result.center == mock_circle_detector.detect.return_value[0]
-        assert result.radius == mock_circle_detector.detect.return_value[1]
+        assert np.array_equal(result.contour, mock_shape_detector.detect.return_value)
 
     def test_process_image_ruler_detection_disabled(self, analyzer: NanoFiberAnalyzer, mock_config: Config,
                                                      mock_ruler_detector: MagicMock):
@@ -171,9 +170,9 @@ class TestNanoFiberAnalyzer:
 
         # Mock analyzer.process_image to simplify testing batch logic
         analyzer.process_image = MagicMock(return_value=AnalysisResult(
-            image_path=Path("dummy"), center=(0,0), radius=0,
+            image_path=Path("dummy"), contour=np.array([]),
             thickness_map=np.array([]), mask=np.array([]),
-            spatial_scale_pixels_per_mm=5.0, # <<< Add here
+            spatial_scale_pixels_per_mm=5.0,
             metadata={}
         ))
 
@@ -207,9 +206,9 @@ class TestNanoFiberAnalyzer:
             if image_path.name == "img_bad.jpg":
                 raise ValueError("Simulated processing error")
             return AnalysisResult(
-                image_path=image_path, center=(1,1), radius=1,
+                image_path=image_path, contour=np.array([]),
                 thickness_map=np.array([1]), mask=np.array([1]),
-                spatial_scale_pixels_per_mm=1.0, # <<< Add here
+                spatial_scale_pixels_per_mm=1.0,
                 metadata={}
             )
 
@@ -220,8 +219,11 @@ class TestNanoFiberAnalyzer:
         assert analyzer.process_image.call_count == len(mock_image_paths)
         assert len(batch_results) == len(mock_image_paths)
 
-        assert batch_results[0]['status'] == 'success'
-        assert batch_results[1]['status'] == 'error'
-        assert batch_results[1]['error_message'] == "Simulated processing error"
-        assert batch_results[1]['image_path'] == str(mock_image_paths[1])
-        assert batch_results[2]['status'] == 'success'
+        # Find the successful and failed results in the output
+        success_results = [r for r in batch_results if r['status'] == 'success']
+        error_results = [r for r in batch_results if r['status'] == 'error']
+
+        assert len(success_results) == 2
+        assert len(error_results) == 1
+        assert error_results[0]['error_message'] == "Simulated processing error"
+        assert error_results[0]['image_path'] == str(mock_image_paths[1])

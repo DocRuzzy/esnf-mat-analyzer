@@ -94,7 +94,7 @@ class RulerDetector:
                     roi_y_start <= tick_y_center <= roi_y_end) : # Ensure center of tick is in ROI
                 continue
 
-            y_check_tolerance = (line_lower_y - line_upper_y) * 0.75 # Allow ticks to be 75% outside main body lines
+            y_check_tolerance = (line_lower_y - line_upper_y) * 1.5 # Allow ticks to be 150% outside main body lines
             if not ( (min(y1,y2) > line_upper_y - y_check_tolerance) and \
                        (max(y1,y2) < line_lower_y + y_check_tolerance) ):
                 continue
@@ -191,7 +191,7 @@ class RulerDetector:
         if not horizontal_lines: return None
 
         min_ruler_len = max(self.config.min_line_length, original_width // 8)
-        ruler_body_cand = self._get_main_ruler_body_lines(horizontal_lines, min_ruler_len, original_height=original_height)
+        ruler_body_cand = self._get_main_ruler_body_lines(horizontal_lines, min_ruler_len, image_height=original_height)
 
         if ruler_body_cand is None: return None
         line_u, line_l = ruler_body_cand

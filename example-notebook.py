@@ -22,11 +22,11 @@ import json
 
 # Import the necessary components
 from nanofiber_analyzer.config.config_manager import (
-    Config, ProcessingConfig, CircleDetectionConfig, 
+    Config, ProcessingConfig,
     ThicknessConfig, UniformityConfig, VisualizationConfig
 )
 from nanofiber_analyzer.processing.image_processor import ImageProcessor
-from nanofiber_analyzer.processing.circle_detector import CircleDetector
+from nanofiber_analyzer.processing.shape_detector import ShapeDetector
 from nanofiber_analyzer.processing.thickness_estimator import ThicknessEstimator
 from nanofiber_analyzer.analysis.radial_uniformity import RadialUniformityIndex
 from nanofiber_analyzer.analysis.gini_coefficient import GiniCoefficient
@@ -45,14 +45,6 @@ processing_config = ProcessingConfig(
     contrast_alpha=1.5,
     contrast_beta=0,
     grayscale_conversion='weighted'
-)
-
-circle_detection_config = CircleDetectionConfig(
-    min_radius=50,
-    max_radius=500,
-    detection_method='hough',
-    param1=50,
-    param2=30
 )
 
 thickness_config = ThicknessConfig(
@@ -82,7 +74,6 @@ output_dir.mkdir(parents=True, exist_ok=True)
 # Create main configuration
 config = Config(
     processing=processing_config,
-    circle_detection=circle_detection_config,
     thickness=thickness_config,
     uniformity=uniformity_config,
     visualization=visualization_config,
@@ -109,8 +100,8 @@ config = Config(
 # Create image processor
 image_processor = ImageProcessor(config.processing)
 
-# Create circle detector
-circle_detector = CircleDetector(config.circle_detection)
+# Create shape detector
+shape_detector = ShapeDetector()
 
 # Create thickness estimator
 thickness_estimator = ThicknessEstimator(config.thickness)
@@ -136,7 +127,7 @@ data_exporter = DataExporter()
 analyzer = NanoFiberAnalyzer(
     config=config,
     image_processor=image_processor,
-    circle_detector=circle_detector,
+    shape_detector=shape_detector,
     thickness_estimator=thickness_estimator,
     uniformity_metrics=uniformity_metrics,
     visualizer=visualizer,
@@ -159,8 +150,7 @@ result = analyzer.process_image(image_path)
 # %%
 # Print basic results
 print(f"Image: {result['image_path']}")
-print(f"Circle center: {result['center']}")
-print(f"Circle radius: {result['radius']}")
+print(f"Contour points: {len(result['contour'])}")
 print("\nUniformity Metrics:")
 for name, value in result['metrics'].items():
     print(f"  {name}: {value:.4f}")
@@ -293,7 +283,6 @@ plt.show()
 # Create a copy of the configuration
 config_log = Config(
     processing=config.processing,
-    circle_detection=config.circle_detection,
     thickness=ThicknessConfig(
         model_type='logarithmic',
         a=1.0,
@@ -309,7 +298,7 @@ config_log = Config(
 analyzer_log = NanoFiberAnalyzer(
     config=config_log,
     image_processor=image_processor,
-    circle_detector=circle_detector,
+    shape_detector=shape_detector,
     thickness_estimator=ThicknessEstimator(config_log.thickness),
     uniformity_metrics=uniformity_metrics,
     visualizer=visualizer,

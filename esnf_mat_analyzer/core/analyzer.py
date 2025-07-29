@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from .interfaces import (
-    AnalyzerInterface, ImageProcessorInterface, CircleDetectorInterface,
+    AnalyzerInterface, ImageProcessorInterface,
     ThicknessEstimatorInterface, UniformityMetricInterface,
     VisualizerInterface, DataExporterInterface
 )
-from .data_types import Config, AnalysisResult, Point
+from .data_types import Config, AnalysisResult
+from ..processing.shape_detector import ShapeDetector
 from ..processing.ruler_detector import RulerDetector
 # Ensure other necessary types like Image, Mask, etc. are available if used directly
 # For now, they are mostly encapsulated in other processors' return types.
@@ -21,7 +22,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         self,
         config: Config,
         image_processor: ImageProcessorInterface,
-        circle_detector: CircleDetectorInterface,
+        shape_detector: ShapeDetector,
         thickness_estimator: ThicknessEstimatorInterface,
         ruler_detector: RulerDetector, # Concrete class, not interface here
         uniformity_metrics: List[UniformityMetricInterface],
@@ -30,7 +31,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
     ):
         self.config = config
         self.image_processor = image_processor
-        self.circle_detector = circle_detector
+        self.shape_detector = shape_detector
         self.thickness_estimator = thickness_estimator
         self.ruler_detector = ruler_detector
         self.uniformity_metrics = uniformity_metrics
@@ -69,19 +70,21 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             except Exception as e:
                 self.logger.error(f"Error during scale detection: {e}", exc_info=True)
 
-        # 3. Preprocess Image (for circle detection and thickness estimation)
+        # 3. Preprocess Image (for shape detection and thickness estimation)
         # It's important that image_processor.preprocess takes the raw_image (RGB)
         # and returns a grayscale image suitable for downstream tasks.
         preprocessed_image = self.image_processor.preprocess(raw_image)
 
-        # 4. Detect Circle
+        # 4. Detect Shape
         try:
-            center, radius = self.circle_detector.detect(preprocessed_image)
-            mask = self.circle_detector.create_mask(preprocessed_image.shape, center, radius)
+            contour = self.shape_detector.detect(preprocessed_image)
+            if contour is None:
+                raise ValueError("Shape detection failed, no contour found.")
+            mask = self.shape_detector.create_mask(preprocessed_image.shape, contour)
         except Exception as e:
-            self.logger.error(f"Error during circle detection: {e}", exc_info=True)
+            self.logger.error(f"Error during shape detection: {e}", exc_info=True)
             # Depending on desired robustness, could raise or return a partial/error result
-            raise ValueError(f"Circle detection failed for {image_path}") from e
+            raise ValueError(f"Shape detection failed for {image_path}") from e
 
 
         # 5. Estimate Thickness
@@ -95,7 +98,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         metrics: Dict[str, float] = {}
         for metric_calculator in self.uniformity_metrics:
             try:
-                metric_value = metric_calculator.calculate(thickness_map, mask, center)
+                metric_value = metric_calculator.calculate(thickness_map, mask, None)
                 metrics[metric_calculator.name] = metric_value
                 self.logger.debug(f"Calculated {metric_calculator.name}: {metric_value}")
             except Exception as e:
@@ -117,8 +120,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
 
         result = AnalysisResult(
             image_path=image_path,
-            center=center,
-            radius=radius,
+            contour=contour,
             thickness_map=thickness_map, # This is the (possibly) calibrated thickness map
             mask=mask,
             saturation_mask=saturation_mask,
@@ -160,8 +162,6 @@ class NanoFiberAnalyzer(AnalyzerInterface):
                 summary_item = {
                     "image_path": str(result_obj.image_path),
                     "status": "success",
-                    "center": result_obj.center,
-                    "radius": result_obj.radius,
                     "metrics": result_obj.metrics,
                     "processing_time": result_obj.processing_time,
                     "spatial_scale_pixels_per_mm": result_obj.spatial_scale_pixels_per_mm, # <<< Access new field

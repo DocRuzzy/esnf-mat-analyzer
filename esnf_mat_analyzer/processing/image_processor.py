@@ -6,7 +6,7 @@ from typing import Dict, Any
 import time # Added for save_debug_image
 
 from ..core.interfaces import ImageProcessorInterface
-from ..core.data_types import ProcessingConfig, GrayscaleConversionMethod, Image
+from ..core.data_types import ProcessingConfig, GrayscaleConversionMethod
 
 class ImageProcessor(ImageProcessorInterface):
     """
@@ -24,7 +24,7 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ImageProcessor initialized with config: {self.config}")
 
-    def load_image(self, path: Path) -> Image:
+    def load_image(self, path: Path) -> np.ndarray:
         """
         Load an image from the specified path. Converts to RGB.
 
@@ -57,7 +57,7 @@ class ImageProcessor(ImageProcessorInterface):
             raise ValueError(f"Error loading image {path}: {e}")
 
 
-    def _apply_grayscale(self, image: Image) -> Image:
+    def _apply_grayscale(self, image: np.ndarray) -> np.ndarray:
         """Applies grayscale conversion based on config."""
         if len(image.shape) == 2: # Already grayscale
             return image
@@ -80,7 +80,7 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.debug(f"Applied grayscale conversion using {method}.")
         return gray_image
 
-    def _apply_blur(self, image: Image) -> Image:
+    def _apply_blur(self, image: np.ndarray) -> np.ndarray:
         """Applies Gaussian blur based on config."""
         kernel_size = self.config.blur_kernel_size
         if kernel_size > 0:
@@ -92,7 +92,7 @@ class ImageProcessor(ImageProcessorInterface):
             return blurred_image
         return image
 
-    def _apply_contrast_brightness(self, image: Image) -> Image:
+    def _apply_contrast_brightness(self, image: np.ndarray) -> np.ndarray:
         """Applies contrast and brightness adjustment based on config."""
         alpha = self.config.contrast_alpha  # Contrast control (1.0-3.0)
         beta = self.config.contrast_beta    # Brightness control (0-100)
@@ -103,7 +103,7 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.debug(f"Applied contrast (alpha={alpha}) and brightness (beta={beta}).")
         return adjusted_image
 
-    def preprocess(self, image: Image) -> Image:
+    def preprocess(self, image: np.ndarray) -> np.ndarray:
         """
         Preprocess the image for analysis.
         Applies grayscale, blur, and contrast adjustments based on config.
@@ -124,7 +124,7 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.info("Image preprocessing complete.")
         return processed_image
 
-    def analyze_image_properties(self, image: Image) -> Dict[str, Any]:
+    def analyze_image_properties(self, image: np.ndarray) -> Dict[str, Any]:
         """Analyzes and returns basic properties of the image."""
         properties = {}
         properties["shape"] = image.shape
@@ -145,7 +145,7 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.debug(f"Analyzed image properties: {properties}")
         return properties
 
-    def save_debug_image(self, image: Image, output_dir: Path, prefix: str) -> Path:
+    def save_debug_image(self, image: np.ndarray, output_dir: Path, prefix: str) -> Path:
         """Saves an image to the debug directory for inspection."""
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
