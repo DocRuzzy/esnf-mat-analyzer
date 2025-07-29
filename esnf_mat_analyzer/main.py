@@ -15,7 +15,7 @@ from typing import Dict, Any
 from esnf_mat_analyzer.core.data_types import ( # Changed source
     Config,
     ProcessingConfig,
-    CircleDetectionConfig,
+    ShapeDetectionConfig,
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
@@ -27,15 +27,13 @@ from esnf_mat_analyzer.core.data_types import ( # Changed source
 
 # Import implementations
 from esnf_mat_analyzer.processing.image_processor import ImageProcessor # Corrected path
-from esnf_mat_analyzer.processing.circle_detector import CircleDetector # Corrected path
+from esnf_mat_analyzer.processing.shape_detector import ShapeDetector # Use ShapeDetector instead of CircleDetector
 from esnf_mat_analyzer.processing.thickness_estimator import ThicknessEstimator # Corrected path
 from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
-from esnf_mat_analyzer.analysis.radial_uniformity import RadialUniformityIndex # Corrected path
-from nanofiber_analyzer.analysis.gini_coefficient import GiniCoefficient
-from nanofiber_analyzer.analysis.thickness_ratio import ThicknessRangeRatio
-from nanofiber_analyzer.visualization.visualizer import Visualizer
-from nanofiber_analyzer.utils.data_exporter import DataExporter
-from nanofiber_analyzer.core.analyzer import NanoFiberAnalyzer
+from esnf_mat_analyzer.analysis.uniformity_metrics import RadialUniformityIndex, GiniCoefficient, ThicknessRangeRatio # Import from uniformity_metrics
+from esnf_mat_analyzer.visualization.visualization import Visualizer
+from esnf_mat_analyzer.utils.data_exporter import DataExporter
+from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:
@@ -75,15 +73,16 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         ),
     )
 
-    # Create circle detection config
-    circle_detection_config = CircleDetectionConfig(
-        min_radius=config_data.get("circle_detection", {}).get("min_radius", 50),
-        max_radius=config_data.get("circle_detection", {}).get("max_radius", 500),
-        detection_method=config_data.get("circle_detection", {}).get(
-            "detection_method", "hough"
+    # Create shape detection config
+    shape_detection_config = ShapeDetectionConfig(
+        min_area=config_data.get("shape_detection", {}).get("min_area", 100),
+        max_area=config_data.get("shape_detection", {}).get("max_area", 50000),
+        detection_method=config_data.get("shape_detection", {}).get(
+            "detection_method", "contour"
         ),
-        param1=config_data.get("circle_detection", {}).get("param1", 50),
-        param2=config_data.get("circle_detection", {}).get("param2", 30),
+        approx_epsilon_ratio=config_data.get("shape_detection", {}).get("approx_epsilon_ratio", 0.02),
+        min_vertices=config_data.get("shape_detection", {}).get("min_vertices", 3),
+        max_vertices=config_data.get("shape_detection", {}).get("max_vertices", 20),
     )
 
     # Create thickness config
@@ -133,7 +132,7 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
     # Create main config
     config = Config(
         processing=processing_config,
-        circle_detection=circle_detection_config,
+        shape_detection=shape_detection_config,
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
@@ -158,7 +157,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
     """
     # Create components
     image_processor = ImageProcessor(config.processing)
-    circle_detector = CircleDetector(config.circle_detection)
+    shape_detector = ShapeDetector() # TODO: Update ShapeDetector to accept config
     thickness_estimator = ThicknessEstimator(config.thickness)
     ruler_detector = RulerDetector(config.ruler_detection) # Modified
 
@@ -177,7 +176,7 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
     analyzer = NanoFiberAnalyzer(
         config=config,
         image_processor=image_processor,
-        circle_detector=circle_detector,
+        shape_detector=shape_detector,  # Changed from circle_detector
         thickness_estimator=thickness_estimator,
         ruler_detector=ruler_detector,
         uniformity_metrics=uniformity_metrics,
@@ -206,12 +205,13 @@ def generate_default_config(output_path: Path) -> None:
             "contrast_beta": config.processing.contrast_beta,
             "grayscale_conversion": config.processing.grayscale_conversion,
         },
-        "circle_detection": {
-            "min_radius": config.circle_detection.min_radius,
-            "max_radius": config.circle_detection.max_radius,
-            "detection_method": config.circle_detection.detection_method,
-            "param1": config.circle_detection.param1,
-            "param2": config.circle_detection.param2,
+        "shape_detection": {
+            "min_area": config.shape_detection.min_area,
+            "max_area": config.shape_detection.max_area,
+            "detection_method": config.shape_detection.detection_method,
+            "approx_epsilon_ratio": config.shape_detection.approx_epsilon_ratio,
+            "min_vertices": config.shape_detection.min_vertices,
+            "max_vertices": config.shape_detection.max_vertices,
         },
         "thickness": {
             "model_type": config.thickness.model_type,
@@ -263,7 +263,7 @@ def main():
 
     # Define arguments
     parser.add_argument(
-        "--input", "-i", type=str, required=True, help="Input image file or directory"
+        "--input", "-i", type=str, help="Input image file or directory"
     )
     parser.add_argument(
         "--output",
@@ -297,6 +297,10 @@ def main():
         generate_default_config(Path(args.generate_config))
         print(f"Default configuration generated at {args.generate_config}")
         return 0
+
+    # Validate that input is provided when not generating config
+    if not args.input:
+        parser.error("--input/-i is required when not using --generate-config")
 
     # Load configuration
     config_data = {}

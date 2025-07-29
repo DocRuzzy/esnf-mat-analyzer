@@ -9,11 +9,12 @@ of nanofiber thickness, including:
 """
 
 import numpy as np
+import cv2
 from typing import Tuple, List
 import logging
 
-from nanofiber_analyzer.core.interfaces import UniformityMetricInterface
-from nanofiber_analyzer.config.config_manager import UniformityConfig
+from esnf_mat_analyzer.core.interfaces import UniformityMetricInterface
+from esnf_mat_analyzer.core.data_types import UniformityConfig
 
 class RadialUniformityIndex(UniformityMetricInterface):
     """

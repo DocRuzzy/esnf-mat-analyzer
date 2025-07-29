@@ -220,7 +220,8 @@ class RulerDetector:
         if len(tick_candidates) < 2: # Need at least 2 ticks to form an interval
             self.logger.warning(f"Not enough tick candidates found ({len(tick_candidates)}). Cannot calculate scale.")
             return None
-        self.logger.info(f"Found {len(tick_candidates)} tick candidates in ROI: {[f'{t["x"]:.0f}' for t in tick_candidates]}")
+        tick_positions = [f"{t['x']:.0f}" for t in tick_candidates]
+        self.logger.info(f"Found {len(tick_candidates)} tick candidates in ROI: {tick_positions}")
 
         # Calculate scale from these ticks
         calculated_scale = self._calculate_scale_from_ticks(tick_candidates)

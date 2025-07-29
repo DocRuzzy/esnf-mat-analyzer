@@ -6,14 +6,15 @@ and uniformity metrics, including heatmaps, radial profiles, and metric plots.
 """
 
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 from typing import Tuple, Dict, Optional, Any, List
 import logging
 
-from nanofiber_analyzer.core.interfaces import VisualizerInterface
-from nanofiber_analyzer.config.config_manager import VisualizationConfig
+from esnf_mat_analyzer.core.interfaces import VisualizerInterface
+from esnf_mat_analyzer.core.data_types import VisualizationConfig
 
 class Visualizer(VisualizerInterface):
     """

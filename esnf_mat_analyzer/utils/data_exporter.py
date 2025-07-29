@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Tuple, List
 import logging
 
-from nanofiber_analyzer.core.interfaces import DataExporterInterface
+from esnf_mat_analyzer.core.interfaces import DataExporterInterface
 
 
 class DataExporter(DataExporterInterface):

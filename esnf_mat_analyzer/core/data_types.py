@@ -48,6 +48,29 @@ class ProcessingConfig:
 
 
 @dataclass
+class ShapeDetectionConfig:
+    """Configuration for shape detection."""
+
+    min_area: int = 100
+    """Minimum area for shape detection."""
+
+    max_area: int = 50000
+    """Maximum area for shape detection."""
+
+    detection_method: str = "contour"
+    """Shape detection method: 'contour', 'hough', or 'adaptive'."""
+
+    approx_epsilon_ratio: float = 0.02
+    """Epsilon ratio for contour approximation."""
+
+    min_vertices: int = 3
+    """Minimum number of vertices for polygon detection."""
+
+    max_vertices: int = 20
+    """Maximum number of vertices for polygon detection."""
+
+
+@dataclass
 class ThicknessConfig:
     """Configuration parameters for thickness estimation."""
 
@@ -171,6 +194,9 @@ class Config:
 
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     """Image processing configuration."""
+
+    shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
+    """Shape detection configuration."""
 
     thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
     """Thickness estimation configuration."""
