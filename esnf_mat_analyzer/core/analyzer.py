@@ -40,7 +40,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info("NanoFiberAnalyzer initialized.")
 
-    def process_image(self, image_path: Path) -> AnalysisResult: # Changed return to AnalysisResult
+    def process_image(self, image_path: Path, roi: Optional[tuple[int, int, int, int]] = None) -> AnalysisResult:
         """
         Processes a single image to analyze nanofiber mat properties.
         """
@@ -56,6 +56,10 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         except ValueError as ve:
             self.logger.error(f"Failed to load image {image_path}: {ve}")
             raise
+
+        # Crop image if ROI is provided
+        if roi:
+            raw_image = self.image_processor.crop_image(raw_image, roi)
 
         # 2. Ruler Detection (on raw image, if enabled)
         spatial_scale_pixels_per_mm: Optional[float] = None

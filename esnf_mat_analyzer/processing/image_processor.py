@@ -124,6 +124,20 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.info("Image preprocessing complete.")
         return processed_image
 
+    def crop_image(self, image: np.ndarray, roi: tuple[int, int, int, int]) -> np.ndarray:
+        """
+        Crops an image to a given region of interest.
+
+        Args:
+            image: The image to crop.
+            roi: A tuple (x1, y1, x2, y2) representing the bounding box.
+
+        Returns:
+            The cropped image.
+        """
+        x1, y1, x2, y2 = roi
+        return image[y1:y2, x1:x2]
+
     def analyze_image_properties(self, image: np.ndarray) -> Dict[str, Any]:
         """Analyzes and returns basic properties of the image."""
         properties = {}

@@ -65,6 +65,16 @@ python -m nanofiber_analyzer.main --generate-config config.yaml
 
 ### Python API
 
+#### GUI
+
+To run the graphical user interface:
+
+```bash
+python run_gui.py
+```
+
+#### Command-Line
+
 ```python
 from pathlib import Path
 from nanofiber_analyzer.main import create_config, setup_dependencies
