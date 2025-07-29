@@ -20,7 +20,9 @@ from esnf_mat_analyzer.core.data_types import ( # Changed source
     UniformityConfig,
     VisualizationConfig,
     RulerDetectionConfig,
-    ExportConfig # Assuming ExportConfig is also in data_types.py
+    ExportConfig, # Assuming ExportConfig is also in data_types.py
+    GrayscaleConversionMethod,
+    ThicknessModelType,
 )
 # Potentially, if config_manager.py had actual loading functions:
 # from nanofiber_analyzer.config.config_manager import actual_load_config_function
@@ -63,14 +65,30 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
     if config_data is None:
         config_data = {}
 
+    # Helper function to convert string to enum
+    def get_grayscale_method(method_str: str) -> GrayscaleConversionMethod:
+        method_map = {
+            "weighted": GrayscaleConversionMethod.WEIGHTED,
+            "average": GrayscaleConversionMethod.AVERAGE,
+            "luminance": GrayscaleConversionMethod.LUMINANCE,
+        }
+        return method_map.get(method_str.lower(), GrayscaleConversionMethod.WEIGHTED)
+
+    def get_thickness_model(model_str: str) -> ThicknessModelType:
+        model_map = {
+            "linear": ThicknessModelType.LINEAR,
+            "logarithmic": ThicknessModelType.LOGARITHMIC,
+            "exponential": ThicknessModelType.EXPONENTIAL,
+        }
+        return model_map.get(model_str.lower(), ThicknessModelType.LINEAR)
+
     # Create processing config
+    grayscale_method_str = config_data.get("processing", {}).get("grayscale_conversion", "weighted")
     processing_config = ProcessingConfig(
         blur_kernel_size=config_data.get("processing", {}).get("blur_kernel_size", 5),
         contrast_alpha=config_data.get("processing", {}).get("contrast_alpha", 1.5),
         contrast_beta=config_data.get("processing", {}).get("contrast_beta", 0),
-        grayscale_conversion=config_data.get("processing", {}).get(
-            "grayscale_conversion", "weighted"
-        ),
+        grayscale_conversion=get_grayscale_method(grayscale_method_str) if isinstance(grayscale_method_str, str) else GrayscaleConversionMethod.WEIGHTED,
     )
 
     # Create shape detection config
@@ -86,8 +104,9 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
     )
 
     # Create thickness config
+    thickness_model_str = config_data.get("thickness", {}).get("model_type", "linear")
     thickness_config = ThicknessConfig(
-        model_type=config_data.get("thickness", {}).get("model_type", "linear"),
+        model_type=get_thickness_model(thickness_model_str) if isinstance(thickness_model_str, str) else ThicknessModelType.LINEAR,
         a=config_data.get("thickness", {}).get("a", 1.0),
         b=config_data.get("thickness", {}).get("b", 0.0),
         saturation_threshold=config_data.get("thickness", {}).get(
@@ -203,7 +222,7 @@ def generate_default_config(output_path: Path) -> None:
             "blur_kernel_size": config.processing.blur_kernel_size,
             "contrast_alpha": config.processing.contrast_alpha,
             "contrast_beta": config.processing.contrast_beta,
-            "grayscale_conversion": config.processing.grayscale_conversion,
+            "grayscale_conversion": "weighted",  # Convert enum to string
         },
         "shape_detection": {
             "min_area": config.shape_detection.min_area,
@@ -214,7 +233,7 @@ def generate_default_config(output_path: Path) -> None:
             "max_vertices": config.shape_detection.max_vertices,
         },
         "thickness": {
-            "model_type": config.thickness.model_type,
+            "model_type": "linear",  # Convert enum to string
             "a": config.thickness.a,
             "b": config.thickness.b,
             "saturation_threshold": config.thickness.saturation_threshold,

@@ -19,9 +19,14 @@ class DataExporter(DataExporterInterface):
     Component for exporting nanofiber analysis data to various file formats.
     """
     
-    def __init__(self):
-        """Initialize the data exporter."""
+    def __init__(self, config=None):
+        """Initialize the data exporter.
+        
+        Args:
+            config: Export configuration (optional)
+        """
         self.logger = logging.getLogger(__name__)
+        self.config = config
     
     def export_thickness_map(self, thickness_map: np.ndarray, path: Path) -> None:
         """

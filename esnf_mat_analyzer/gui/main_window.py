@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from PIL import Image, ImageTk
 from pathlib import Path
+import math
 from esnf_mat_analyzer.main import create_config, setup_dependencies
 
 class MainWindow(tk.Tk):
@@ -12,9 +13,23 @@ class MainWindow(tk.Tk):
 
         self.selected_files = []
         self.current_image = None
+        self.displayed_image = None
+        self.tk_image = None
         self.rect = None
         self.start_x = None
         self.start_y = None
+        
+        # Image display properties
+        self.scale_factor = 1.0
+        self.min_scale = 0.1
+        self.max_scale = 5.0
+        self.canvas_width = 800
+        self.canvas_height = 600
+        
+        # Pan properties
+        self.pan_start_x = 0
+        self.pan_start_y = 0
+        self.is_panning = False
 
         self.create_widgets()
 
@@ -48,16 +63,60 @@ class MainWindow(tk.Tk):
         )
         self.analyze_button.pack(padx=5, pady=5)
 
+        # Image controls
+        self.image_controls_frame = ttk.LabelFrame(self.left_panel, text="Image Controls")
+        self.image_controls_frame.pack(fill=tk.X, pady=5)
+
+        # Zoom controls
+        zoom_frame = ttk.Frame(self.image_controls_frame)
+        zoom_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(zoom_frame, text="Zoom:").pack(side=tk.LEFT)
+        self.zoom_in_button = ttk.Button(zoom_frame, text="+", width=3, command=self.zoom_in)
+        self.zoom_in_button.pack(side=tk.LEFT, padx=2)
+        
+        self.zoom_out_button = ttk.Button(zoom_frame, text="-", width=3, command=self.zoom_out)
+        self.zoom_out_button.pack(side=tk.LEFT, padx=2)
+        
+        self.fit_button = ttk.Button(zoom_frame, text="Fit", command=self.fit_to_window)
+        self.fit_button.pack(side=tk.LEFT, padx=2)
+        
+        self.reset_button = ttk.Button(zoom_frame, text="100%", command=self.reset_zoom)
+        self.reset_button.pack(side=tk.LEFT, padx=2)
+
+        # Scale display
+        self.scale_label = ttk.Label(self.image_controls_frame, text="Scale: 100%")
+        self.scale_label.pack(pady=2)
+
         # Right panel for image display
         self.image_frame = ttk.LabelFrame(self.main_frame, text="Image Preview")
         self.image_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        self.canvas = tk.Canvas(self.image_frame, bg="gray")
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Create scrollable canvas
+        self.canvas_frame = ttk.Frame(self.image_frame)
+        self.canvas_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(self.canvas_frame, bg="gray")
+        
+        # Add scrollbars
+        self.v_scrollbar = ttk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.h_scrollbar = ttk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        self.canvas.configure(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
+        
+        # Pack scrollbars and canvas
+        self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Bind events
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+        self.canvas.bind("<ButtonPress-3>", self.start_pan)  # Right click to pan
+        self.canvas.bind("<B3-Motion>", self.do_pan)
+        self.canvas.bind("<ButtonRelease-3>", self.end_pan)
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)  # Mouse wheel zoom
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
 
     def select_files(self):
         files = filedialog.askopenfilenames(
@@ -84,38 +143,171 @@ class MainWindow(tk.Tk):
         try:
             image = Image.open(filepath)
             self.current_image = image
-            self.display_image(image)
+            self.fit_to_window()
         except Exception as e:
             print(f"Error loading image: {e}")
 
-    def display_image(self, image):
+    def fit_to_window(self):
+        if not self.current_image:
+            return
+            
+        # Get canvas dimensions
+        self.canvas.update_idletasks()
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas not ready yet, try again later
+            self.canvas.after(100, self.fit_to_window)
+            return
+        
+        # Calculate scale to fit image in canvas
+        img_width, img_height = self.current_image.size
+        scale_x = (canvas_width - 20) / img_width  # Leave some margin
+        scale_y = (canvas_height - 20) / img_height
+        
+        self.scale_factor = min(scale_x, scale_y, 1.0)  # Don't scale up initially
+        self.scale_factor = max(self.scale_factor, self.min_scale)
+        
+        self.update_image_display()
+
+    def reset_zoom(self):
+        if not self.current_image:
+            return
+        self.scale_factor = 1.0
+        self.update_image_display()
+
+    def zoom_in(self):
+        if not self.current_image:
+            return
+        self.scale_factor = min(self.scale_factor * 1.2, self.max_scale)
+        self.update_image_display()
+
+    def zoom_out(self):
+        if not self.current_image:
+            return
+        self.scale_factor = max(self.scale_factor / 1.2, self.min_scale)
+        self.update_image_display()
+
+    def on_mousewheel(self, event):
+        if not self.current_image:
+            return
+            
+        # Zoom in/out with mouse wheel
+        if event.delta > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+
+    def on_canvas_configure(self, event):
+        # Update scroll region when canvas is resized
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def update_image_display(self):
+        if not self.current_image:
+            return
+            
+        # Clear canvas
         self.canvas.delete("all")
-        self.tk_image = ImageTk.PhotoImage(image)
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image)
-        self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
+        
+        # Calculate new image size
+        img_width, img_height = self.current_image.size
+        new_width = int(img_width * self.scale_factor)
+        new_height = int(img_height * self.scale_factor)
+        
+        # Resize image
+        if new_width > 0 and new_height > 0:
+            self.displayed_image = self.current_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            self.tk_image = ImageTk.PhotoImage(self.displayed_image)
+            
+            # Display image
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image, tags="image")
+            
+            # Update scroll region
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            
+            # Update scale label
+            self.scale_label.config(text=f"Scale: {self.scale_factor*100:.0f}%")
+
+    def start_pan(self, event):
+        self.is_panning = True
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+
+    def do_pan(self, event):
+        if not self.is_panning:
+            return
+            
+        # Calculate how much to pan
+        dx = event.x - self.pan_start_x
+        dy = event.y - self.pan_start_y
+        
+        # Pan the canvas
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
+        
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+
+    def end_pan(self, event):
+        self.is_panning = False
 
     def on_button_press(self, event):
-        self.start_x = event.x
-        self.start_y = event.y
+        if self.is_panning:
+            return
+            
+        # Convert canvas coordinates to actual coordinates
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
+        self.start_x = canvas_x
+        self.start_y = canvas_y
+        
         if self.rect:
             self.canvas.delete(self.rect)
-        self.rect = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red")
+        self.rect = self.canvas.create_rectangle(
+            self.start_x, self.start_y, self.start_x, self.start_y, 
+            outline="red", width=2, tags="roi"
+        )
 
     def on_mouse_drag(self, event):
-        cur_x, cur_y = (event.x, event.y)
-        self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
+        if self.is_panning or not self.start_x or not self.start_y:
+            return
+            
+        # Convert canvas coordinates to actual coordinates
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
+        self.canvas.coords(self.rect, self.start_x, self.start_y, canvas_x, canvas_y)
 
     def on_button_release(self, event):
-        pass
+        if self.is_panning:
+            return
+        # ROI selection complete
 
     def analyze(self):
         if not self.current_image or not self.rect:
             print("No image or ROI selected")
             return
 
-        # Get ROI from canvas
+        # Get ROI from canvas (in scaled coordinates)
         x1, y1, x2, y2 = self.canvas.coords(self.rect)
-        roi = (int(x1), int(y1), int(x2), int(y2))
+        
+        # Convert scaled coordinates back to original image coordinates
+        orig_x1 = int(x1 / self.scale_factor)
+        orig_y1 = int(y1 / self.scale_factor)
+        orig_x2 = int(x2 / self.scale_factor)
+        orig_y2 = int(y2 / self.scale_factor)
+        
+        # Ensure coordinates are within image bounds
+        img_width, img_height = self.current_image.size
+        orig_x1 = max(0, min(orig_x1, img_width))
+        orig_y1 = max(0, min(orig_y1, img_height))
+        orig_x2 = max(0, min(orig_x2, img_width))
+        orig_y2 = max(0, min(orig_y2, img_height))
+        
+        roi = (orig_x1, orig_y1, orig_x2, orig_y2)
+        
+        print(f"ROI in original coordinates: {roi}")
 
         # Get selected file
         selection = self.file_listbox.curselection()
