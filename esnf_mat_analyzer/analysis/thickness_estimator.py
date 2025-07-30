@@ -3,10 +3,10 @@ import numpy as np
 import logging
 from typing import Optional
 
-from esnf_mat_analyzer.core.interfaces import ThicknessEstimatorInterface
+from esnf_mat_analyzer.core.interfaces import IThicknessEstimator
 from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType, Mask, ThicknessMap, Image
 
-class ThicknessEstimator(ThicknessEstimatorInterface):
+class ThicknessEstimator(IThicknessEstimator):
     """
     Estimates thickness from image brightness.
     """
@@ -22,18 +22,20 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ThicknessEstimator initialized with config: {self.config}")
 
-    def estimate(self, image: Image, mask: Mask) -> ThicknessMap:
-        """
-        Estimate thickness from image brightness.
+    def estimate_thickness(self, image: np.ndarray, background: np.ndarray) -> np.ndarray:
+        """Estimate thickness from image intensity data.
 
         Args:
-            image: Preprocessed grayscale image (assumed to be 0-255 range).
-            mask: Binary mask indicating the region of interest.
+            image: Preprocessed image array
+            background: Background reference image
 
         Returns:
-            2D thickness map. Units depend on model and calibration_factor.
+            2D thickness map in calibrated units
+
+        Raises:
+            ThicknessEstimationError: When estimation fails
         """
-        self.logger.debug(f"Estimating thickness for image of shape {image.shape} using mask.")
+        self.logger.debug(f"Estimating thickness for image of shape {image.shape} using background of shape {background.shape}.")
 
         if len(image.shape) != 2:
             self.logger.error("Input image for thickness estimation must be grayscale.")
@@ -58,9 +60,6 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
             self.logger.error(f"Unknown thickness model type: {self.config.model_type}")
             raise ValueError(f"Unknown thickness model type: {self.config.model_type}")
 
-        # Apply mask - set thickness to 0 (or NaN) outside the ROI
-        thickness_map[mask == 0] = 0.0 # Or np.nan if preferred downstream
-
         # Apply calibration factor if provided
         if self.config.calibration_factor is not None and self.config.calibration_factor > 0:
             self.logger.info(f"Applying calibration factor: {self.config.calibration_factor}")
@@ -71,13 +70,12 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         # Normalization (optional, based on config)
         if self.config.normalization:
             self.logger.info("Normalizing thickness map to [0, 1] range.")
-            min_val = np.min(thickness_map[mask > 0]) if np.any(thickness_map[mask > 0]) else 0
-            max_val = np.max(thickness_map[mask > 0]) if np.any(thickness_map[mask > 0]) else 0
+            min_val = np.min(thickness_map)
+            max_val = np.max(thickness_map)
             if max_val > min_val:
                 thickness_map = (thickness_map - min_val) / (max_val - min_val)
-                thickness_map[mask == 0] = 0.0 # Restore masked area if changed by normalization
             elif max_val == min_val and max_val > 0: # All values in mask are the same and positive
-                 thickness_map[mask > 0] = 1.0
+                 thickness_map = np.ones_like(thickness_map)
             # else: all zeros or single value, no normalization needed or possible
 
         # Ensure non-negative thickness

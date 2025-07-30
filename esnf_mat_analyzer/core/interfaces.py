@@ -1,117 +1,26 @@
-"""
-Core interfaces for the ESNF Mat Analyzer.
-
-This module defines the core interfaces and protocols for the nanofiber thickness
-uniformity analysis system, following SOLID design principles. These interfaces
-establish the contract between different components of the system, enabling
-loose coupling and dependency injection.
-"""
-
+# esnf_mat_analyzer/core/interfaces.py
 from abc import ABC, abstractmethod
-from typing import (
-    Protocol,
-    Tuple,
-    Dict,
-    List,
-    Optional,
-    Any,
-    TypeVar,
-    runtime_checkable,
-)
+from typing import Protocol, runtime_checkable
 import numpy as np
-from pathlib import Path
-
-# Type definitions
-Image = np.ndarray
-Mask = np.ndarray
-ThicknessMap = np.ndarray
-Point = Tuple[int, int]
-Metrics = Dict[str, float]
-Figure = Any  # Matplotlib figure or similar
-
 
 @runtime_checkable
-class ImageProcessorInterface(Protocol):
-    """
-    Interface for image loading and preprocessing.
+class IThicknessEstimator(Protocol):
+    """Interface for thickness estimation strategies."""
 
-    Responsible for loading images from files and performing preprocessing
-    operations such as noise reduction, contrast enhancement, and grayscale
-    conversion.
-    """
-
-    def load_image(self, path: Path) -> Image:
-        """
-        Load an image from the specified path.
+    def estimate_thickness(self, image: np.ndarray, background: np.ndarray) -> np.ndarray:
+        """Estimate thickness from image intensity data.
 
         Args:
-            path: Path to the image file
+            image: Preprocessed image array
+            background: Background reference image
 
         Returns:
-            Loaded image as a numpy array
+            2D thickness map in calibrated units
 
         Raises:
-            FileNotFoundError: If the image file does not exist
-            ValueError: If the image cannot be loaded
+            ThicknessEstimationError: When estimation fails
         """
         ...
-
-    def preprocess(self, image: Image) -> Image:
-        """
-        Preprocess the image for analysis.
-
-        Applies operations like noise reduction, contrast enhancement,
-        and grayscale conversion.
-
-        Args:
-            image: Input image
-
-        Returns:
-            Preprocessed image ready for analysis
-        """
-        ...
-
-
-@runtime_checkable
-class CircleDetectorInterface(Protocol):
-    """
-    Interface for detecting circular regions in images.
-
-    Responsible for identifying and extracting the circular region of interest
-    in nanofiber mat images.
-    """
-
-    def detect(self, image: Image) -> Tuple[Point, int]:
-        """
-        Detect the circular region in the image.
-
-        Args:
-            image: Preprocessed image
-
-        Returns:
-            Tuple of ((center_x, center_y), radius)
-
-        Raises:
-            ValueError: If no circular region can be detected
-        """
-        ...
-
-    def create_mask(
-        self, image_shape: Tuple[int, int], center: Point, radius: int
-    ) -> Mask:
-        """
-        Create a binary mask for the circular region.
-
-        Args:
-            image_shape: Shape of the image (height, width)
-            center: Center coordinates (x, y)
-            radius: Radius of the circle
-
-        Returns:
-            Binary mask where 1 indicates the circular region
-        """
-        ...
-
 
 @runtime_checkable
 class ThicknessEstimatorInterface(Protocol):
@@ -122,7 +31,7 @@ class ThicknessEstimatorInterface(Protocol):
     using various models (linear, logarithmic, exponential).
     """
 
-    def estimate(self, image: Image, mask: Mask) -> ThicknessMap:
+    def estimate(self, image: 'Image', mask: 'Mask') -> 'ThicknessMap':
         """
         Estimate thickness from image brightness.
 
@@ -135,7 +44,7 @@ class ThicknessEstimatorInterface(Protocol):
         """
         ...
 
-    def get_saturation_mask(self, image: Image, mask: Mask) -> Mask:
+    def get_saturation_mask(self, image: 'Image', mask: 'Mask') -> 'Mask':
         """
         Create a mask of saturated pixels.
 
@@ -151,6 +60,21 @@ class ThicknessEstimatorInterface(Protocol):
         """
         ...
 
+@runtime_checkable
+class IUniformityMetric(Protocol):
+    """Interface for uniformity calculation strategies."""
+
+    def calculate_metric(self, thickness_map: np.ndarray, roi_mask: np.ndarray) -> float:
+        """Calculate uniformity metric from thickness map.
+
+        Args:
+            thickness_map: 2D thickness distribution
+            roi_mask: Boolean mask defining analysis region
+
+        Returns:
+            Uniformity metric value (normalized 0-1 where appropriate)
+        """
+        ...
 
 class UniformityMetricInterface(ABC):
     """
@@ -162,7 +86,7 @@ class UniformityMetricInterface(ABC):
 
     @abstractmethod
     def calculate(
-        self, thickness_map: ThicknessMap, mask: Mask, center: Point
+        self, thickness_map: 'ThicknessMap', mask: 'Mask', center: 'Point'
     ) -> float:
         """
         Calculate the uniformity metric.
@@ -199,6 +123,54 @@ class UniformityMetricInterface(ABC):
         """
         return True  # Default implementation
 
+class IImageProcessor(ABC):
+    """Abstract base class for image processing operations."""
+
+    @abstractmethod
+    def process(self, image: np.ndarray, config: 'ProcessingConfig') -> np.ndarray:
+        """Process raw image according to configuration."""
+        pass
+
+@runtime_checkable
+class ImageProcessorInterface(Protocol):
+    """
+    Interface for image loading and preprocessing.
+
+    Responsible for loading images from files and performing preprocessing
+    operations such as noise reduction, contrast enhancement, and grayscale
+    conversion.
+    """
+
+    def load_image(self, path: 'Path') -> 'Image':
+        """
+        Load an image from the specified path.
+
+        Args:
+            path: Path to the image file
+
+        Returns:
+            Loaded image as a numpy array
+
+        Raises:
+            FileNotFoundError: If the image file does not exist
+            ValueError: If the image cannot be loaded
+        """
+        ...
+
+    def preprocess(self, image: 'Image') -> 'Image':
+        """
+        Preprocess the image for analysis.
+
+        Applies operations like noise reduction, contrast enhancement,
+        and grayscale conversion.
+
+        Args:
+            image: Input image
+
+        Returns:
+            Preprocessed image ready for analysis
+        """
+        ...
 
 @runtime_checkable
 class VisualizerInterface(Protocol):
@@ -211,10 +183,10 @@ class VisualizerInterface(Protocol):
 
     def create_thickness_heatmap(
         self,
-        thickness_map: ThicknessMap,
-        mask: Mask,
-        saturation_mask: Optional[Mask] = None,
-    ) -> Figure:
+        thickness_map: 'ThicknessMap',
+        mask: 'Mask',
+        saturation_mask: 'Optional[Mask]' = None,
+    ) -> 'Figure':
         """
         Create a heatmap visualization of the thickness map.
 
@@ -229,8 +201,8 @@ class VisualizerInterface(Protocol):
         ...
 
     def create_radial_profile(
-        self, thickness_map: ThicknessMap, mask: Mask, center: Point
-    ) -> Figure:
+        self, thickness_map: 'ThicknessMap', mask: 'Mask', center: 'Point'
+    ) -> 'Figure':
         """
         Create a visualization of thickness along radial lines.
 
@@ -245,8 +217,8 @@ class VisualizerInterface(Protocol):
         ...
 
     def create_uniformity_visualization(
-        self, thickness_map: ThicknessMap, mask: Mask, metrics: Metrics
-    ) -> Figure:
+        self, thickness_map: 'ThicknessMap', mask: 'Mask', metrics: 'Metrics'
+    ) -> 'Figure':
         """
         Create a visualization of uniformity metrics.
 
@@ -260,7 +232,6 @@ class VisualizerInterface(Protocol):
         """
         ...
 
-
 @runtime_checkable
 class DataExporterInterface(Protocol):
     """
@@ -269,7 +240,7 @@ class DataExporterInterface(Protocol):
     Responsible for saving analysis results to various file formats.
     """
 
-    def export_thickness_map(self, thickness_map: ThicknessMap, path: Path) -> None:
+    def export_thickness_map(self, thickness_map: 'ThicknessMap', path: 'Path') -> None:
         """
         Export the thickness map to a file.
 
@@ -282,7 +253,7 @@ class DataExporterInterface(Protocol):
         """
         ...
 
-    def export_metrics(self, metrics: Metrics, path: Path) -> None:
+    def export_metrics(self, metrics: 'Metrics', path: 'Path') -> None:
         """
         Export uniformity metrics to a file.
 
@@ -296,7 +267,7 @@ class DataExporterInterface(Protocol):
         ...
 
     def export_summary(
-        self, image_path: Path, center: Point, radius: int, metrics: Metrics, path: Path
+        self, image_path: 'Path', center: 'Point', radius: int, metrics: 'Metrics', path: 'Path'
     ) -> None:
         """
         Export a summary of the analysis results.
@@ -313,7 +284,6 @@ class DataExporterInterface(Protocol):
         """
         ...
 
-
 class AnalyzerInterface(ABC):
     """
     Interface for the main analyzer class.
@@ -323,7 +293,7 @@ class AnalyzerInterface(ABC):
     """
 
     @abstractmethod
-    def process_image(self, image_path: Path) -> Dict[str, Any]:
+    def process_image(self, image_path: 'Path') -> 'Dict[str, Any]':
         """
         Process a single image and calculate uniformity metrics.
 
@@ -346,8 +316,8 @@ class AnalyzerInterface(ABC):
 
     @abstractmethod
     def batch_process(
-        self, image_dir: Path, pattern: str = "*.jpg"
-    ) -> List[Dict[str, Any]]:
+        self, image_dir: 'Path', pattern: str = "*.jpg"
+    ) -> 'List[Dict[str, Any]]':
         """
         Process multiple images in a directory.
 

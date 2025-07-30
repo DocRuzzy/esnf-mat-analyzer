@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Dict, Any
 import time # Added for save_debug_image
 
-from ..core.interfaces import ImageProcessorInterface
-from ..core.data_types import ProcessingConfig, GrayscaleConversionMethod
+from ..core.interfaces import IImageProcessor
+from ..core.data_types import ProcessingConfig
 
-class ImageProcessor(ImageProcessorInterface):
+class ImageProcessor(IImageProcessor):
     """
     Handles image loading and preprocessing operations.
     """
@@ -24,38 +24,24 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ImageProcessor initialized with config: {self.config}")
 
-    def load_image(self, path: Path) -> np.ndarray:
-        """
-        Load an image from the specified path. Converts to RGB.
+    def process(self, image: np.ndarray, config: 'ProcessingConfig') -> np.ndarray:
+        """Process raw image according to configuration."""
+        self.logger.debug("Starting image preprocessing.")
 
-        Args:
-            path: Path to the image file.
+        # 1. Grayscale conversion
+        processed_image = self._apply_grayscale(image)
 
-        Returns:
-            Loaded image as a numpy array (RGB).
+        # 2. Background Leveling
+        processed_image = self._apply_leveling(processed_image)
 
-        Raises:
-            FileNotFoundError: If the image file does not exist.
-            ValueError: If the image cannot be loaded or is invalid.
-        """
-        if not path.exists():
-            self.logger.error(f"Image file not found at {path}")
-            raise FileNotFoundError(f"Image file not found at {path}")
+        # 3. Blur
+        processed_image = self._apply_blur(processed_image)
 
-        try:
-            image = cv2.imread(str(path))
-            if image is None:
-                self.logger.error(f"Failed to load image from {path} (cv2.imread returned None).")
-                raise ValueError(f"Failed to load image from {path}. File might be corrupted or an unsupported format.")
+        # 4. Contrast/Brightness (on grayscale image)
+        processed_image = self._apply_contrast_brightness(processed_image)
 
-            # Convert BGR (OpenCV default) to RGB for consistency
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            self.logger.debug(f"Image loaded from {path}, shape: {image_rgb.shape}")
-            return image_rgb
-        except Exception as e:
-            self.logger.error(f"Error loading image {path}: {e}", exc_info=True)
-            raise ValueError(f"Error loading image {path}: {e}")
-
+        self.logger.info("Image preprocessing complete.")
+        return processed_image
 
     def _apply_grayscale(self, image: np.ndarray) -> np.ndarray:
         """Applies grayscale conversion based on config."""
@@ -66,12 +52,12 @@ class ImageProcessor(ImageProcessorInterface):
              return image
 
         method = self.config.grayscale_conversion
-        if method == GrayscaleConversionMethod.WEIGHTED:
+        if method == "WEIGHTED":
             # Standard RGB to Grayscale conversion: Y = 0.299R + 0.587G + 0.114B
             gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        elif method == GrayscaleConversionMethod.AVERAGE:
+        elif method == "AVERAGE":
             gray_image = np.mean(image, axis=2).astype(np.uint8)
-        elif method == GrayscaleConversionMethod.LUMINANCE: # Perceptual luminance (closer to human perception)
+        elif method == "LUMINANCE": # Perceptual luminance (closer to human perception)
             # Using a common formula, slightly different from OpenCV's default weighted
             gray_image = (0.2126 * image[:,:,0] + 0.7152 * image[:,:,1] + 0.0722 * image[:,:,2]).astype(np.uint8)
         else:
@@ -166,84 +152,3 @@ class ImageProcessor(ImageProcessorInterface):
 
         self.logger.debug("Background leveling complete.")
         return leveled_image
-
-    def preprocess(self, image: np.ndarray) -> np.ndarray:
-        """
-        Preprocess the image for analysis.
-        Applies grayscale, blur, and contrast adjustments based on config.
-        Input image is expected to be RGB.
-        Output image is grayscale.
-        """
-        self.logger.debug("Starting image preprocessing.")
-
-        # 1. Grayscale conversion
-        processed_image = self._apply_grayscale(image)
-
-        # 2. Background Leveling
-        processed_image = self._apply_leveling(processed_image)
-
-        # 3. Blur
-        processed_image = self._apply_blur(processed_image)
-
-        # 4. Contrast/Brightness (on grayscale image)
-        processed_image = self._apply_contrast_brightness(processed_image)
-
-        self.logger.info("Image preprocessing complete.")
-        return processed_image
-
-    def crop_image(self, image: np.ndarray, roi: tuple[int, int, int, int]) -> np.ndarray:
-        """
-        Crops an image to a given region of interest.
-
-        Args:
-            image: The image to crop.
-            roi: A tuple (x1, y1, x2, y2) representing the bounding box.
-
-        Returns:
-            The cropped image.
-        """
-        x1, y1, x2, y2 = roi
-        return image[y1:y2, x1:x2]
-
-    def analyze_image_properties(self, image: np.ndarray) -> Dict[str, Any]:
-        """Analyzes and returns basic properties of the image."""
-        properties = {}
-        properties["shape"] = image.shape
-        properties["dtype"] = str(image.dtype)
-
-        if len(image.shape) == 3:
-            properties["channels"] = image.shape[2]
-        elif len(image.shape) == 2:
-            properties["channels"] = 1
-        else:
-            properties["channels"] = "Unknown"
-
-        properties["min_value"] = int(np.min(image))
-        properties["max_value"] = int(np.max(image))
-        properties["mean_value"] = float(np.mean(image))
-        properties["std_deviation"] = float(np.std(image))
-
-        self.logger.debug(f"Analyzed image properties: {properties}")
-        return properties
-
-    def save_debug_image(self, image: np.ndarray, output_dir: Path, prefix: str) -> Path:
-        """Saves an image to the debug directory for inspection."""
-        if not output_dir.exists():
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = f"{prefix}_{timestamp}.png"
-        filepath = output_dir / filename
-
-        try:
-            # If image is RGB, convert to BGR for OpenCV imwrite
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image_to_save = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            else: # Grayscale or other, save as is
-                image_to_save = image
-            cv2.imwrite(str(filepath), image_to_save)
-            self.logger.info(f"Saved debug image to {filepath}")
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Failed to save debug image {filepath}: {e}", exc_info=True)
-            raise
