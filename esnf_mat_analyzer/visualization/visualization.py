@@ -56,7 +56,20 @@ class Visualizer(VisualizerInterface):
         cmap = plt.get_cmap(self.config.colormap)
         
         # Create heatmap
-        im = ax.imshow(masked_thickness, cmap=cmap)
+        # Calculate reasonable color limits based on the actual data
+        if self.config.auto_range_heatmap:
+            valid_data = masked_thickness.compressed()  # Get non-masked values
+            if len(valid_data) > 0:
+                # Use configurable percentiles to avoid extreme outliers affecting the color scale
+                min_percentile, max_percentile = self.config.heatmap_percentile_range
+                vmin = np.percentile(valid_data, min_percentile)
+                vmax = np.percentile(valid_data, max_percentile)
+            else:
+                vmin, vmax = None, None
+        else:
+            vmin, vmax = None, None
+        
+        im = ax.imshow(masked_thickness, cmap=cmap, vmin=vmin, vmax=vmax)
         
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax)

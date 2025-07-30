@@ -146,6 +146,12 @@ class VisualizationConfig:
     show_saturated: bool = True
     """Whether to highlight saturated regions in visualizations."""
 
+    heatmap_percentile_range: Tuple[float, float] = (2.0, 98.0)
+    """Percentile range for heatmap color scaling (min_percentile, max_percentile)."""
+
+    auto_range_heatmap: bool = True
+    """Whether to automatically adjust heatmap color range based on data percentiles."""
+
     radial_avg_line_color: str = "blue"
     """Color for the average line in radial profiles."""
 

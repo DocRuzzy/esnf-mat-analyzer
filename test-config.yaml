@@ -13,6 +13,9 @@ processing:
   contrast_alpha: 1.5
   contrast_beta: 0
   grayscale_conversion: weighted
+  leveling:
+    enabled: true
+    kernel_size: 25
 ruler_detection:
   canny_threshold1: 50
   canny_threshold2: 150
@@ -44,3 +47,7 @@ visualization:
   - 10
   - 8
   show_saturated: true
+  heatmap_percentile_range: !!python/tuple
+  - 2.0
+  - 98.0
+  auto_range_heatmap: true

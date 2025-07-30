@@ -65,6 +65,24 @@ class MainWindow(tk.Tk):
         self.analysis_frame = ttk.LabelFrame(self.left_panel, text="Analysis")
         self.analysis_frame.pack(fill=tk.X, pady=5)
 
+        # Background leveling checkbox
+        self.background_leveling_var = tk.BooleanVar(value=True)
+        self.background_leveling_checkbox = ttk.Checkbutton(
+            self.analysis_frame, 
+            text="Enable Background Leveling", 
+            variable=self.background_leveling_var
+        )
+        self.background_leveling_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+
+        # Heatmap auto-range checkbox
+        self.auto_range_var = tk.BooleanVar(value=True)
+        self.auto_range_checkbox = ttk.Checkbutton(
+            self.analysis_frame, 
+            text="Auto-adjust Heatmap Range", 
+            variable=self.auto_range_var
+        )
+        self.auto_range_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+
         self.analyze_button = ttk.Button(
             self.analysis_frame, text="Analyze", command=self.analyze
         )
@@ -429,6 +447,10 @@ class MainWindow(tk.Tk):
 
         # Create config and analyzer
         config = create_config()
+        
+        # Update background leveling setting based on checkbox
+        config.processing.leveling.enabled = self.background_leveling_var.get()
+        
         analyzer = setup_dependencies(config)
 
         # Run analysis
@@ -443,8 +465,9 @@ class MainWindow(tk.Tk):
             print("Please run an analysis first.")
             return
 
-        # Create a visualizer
+        # Create a visualizer with custom configuration
         vis_config = VisualizationConfig()
+        vis_config.auto_range_heatmap = self.auto_range_var.get()
         visualizer = Visualizer(vis_config)
 
         # Create the heatmap figure
@@ -480,6 +503,7 @@ class MainWindow(tk.Tk):
         # If a heatmap exists, blend it with the image
         if self.last_analysis_result:
             vis_config = VisualizationConfig()
+            vis_config.auto_range_heatmap = self.auto_range_var.get()
             visualizer = Visualizer(vis_config)
             fig = visualizer.create_thickness_heatmap(
                 self.last_analysis_result.thickness_map,
