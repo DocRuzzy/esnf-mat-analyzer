@@ -1,53 +1,61 @@
-export:
-  compress_outputs: false
-  csv_delimiter: ','
-  export_formats:
-  - csv
-  - json
-  - txt
-  include_metadata: true
-log_level: INFO
-output_dir: output
 processing:
   blur_kernel_size: 5
   contrast_alpha: 1.5
   contrast_beta: 0
   grayscale_conversion: weighted
-  leveling:
-    enabled: true
-    kernel_size: 25
-ruler_detection:
-  canny_threshold1: 50
-  canny_threshold2: 150
-  enabled: true
-  expected_tick_distance_mm: 1.0
-  hough_threshold: 20
-  max_line_gap: 10
-  min_line_length: 50
-shape_detection:
-  approx_epsilon_ratio: 0.02
-  detection_method: contour
-  max_area: 50000
-  max_vertices: 20
-  min_area: 100
-  min_vertices: 3
+  background_correction_method: none
+  basic_correction_n_components: 1
+  rolling_ball_radius: 50
+  restore_percentile: 5.0
+  homomorphic_cutoff: 30
+  homomorphic_g_low: 0.5
+  homomorphic_g_high: 2.0
+  saturation_recovery: false
 thickness:
+  model_type: beer_lambert
   a: 1.0
   b: 0.0
-  model_type: linear
-  saturation_threshold: 250
+  saturation_threshold: 240
+  normalization: false
+  calibration_factor: null
+  attenuation_coefficient: 0.04778
 uniformity:
-  bin_count: 50
   num_radial_lines: 36
+  bin_count: 50
   smoothing_factor: 0.5
+  min_thickness_percentile: 5.0
+  max_thickness_percentile: 95.0
+  ignore_saturated: true
+  glcm_distances:
+  - 1
+  - 2
+  - 4
+  glcm_angles:
+  - 0
+  - 0.7853981633974483
+  - 1.5707963267948966
+  - 2.356194490192345
+  lbp_radius: 1
+  lbp_points: 8
 visualization:
   colormap: viridis
   dpi: 300
-  figure_size: !!python/tuple
+  figure_size:
   - 10
   - 8
   show_saturated: true
-  heatmap_percentile_range: !!python/tuple
-  - 2.0
-  - 98.0
-  auto_range_heatmap: true
+  radial_avg_line_color: blue
+  radial_std_fill_color: skyblue
+  histogram_color: skyblue
+  histogram_edge_color: black
+export:
+  csv_delimiter: ','
+  export_formats:
+  - csv
+  - json
+  - txt
+  compress_outputs: false
+  include_metadata: true
+output_dir: output
+log_level: INFO
+cache_intermediates: true

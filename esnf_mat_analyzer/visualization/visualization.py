@@ -1,5 +1,9 @@
+
 """
 Visualization components for nanofiber thickness analysis.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
 
 This module implements various visualization techniques for thickness maps
 and uniformity metrics, including heatmaps, radial profiles, and metric plots.

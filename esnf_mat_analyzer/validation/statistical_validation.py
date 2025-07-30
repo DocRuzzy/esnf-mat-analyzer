@@ -1,3 +1,10 @@
+"""
+Statistical validation for ESNF Mat Analyzer.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
+"""
+
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 from scipy import stats

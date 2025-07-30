@@ -1,5 +1,9 @@
+
 """
 Main application module for nanofiber thickness uniformity analysis.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
 
 This module provides the entry point for the application and dependency injection setup.
 """
@@ -374,8 +378,22 @@ def cli_main():
 
 
 def main():
-    """Main entry point for the command-line interface."""
-    return cli_main()
+    """
+    Main entry point that delegates to the professional CLI.
+    
+    This function provides backward compatibility while directing users
+    to the enhanced CLI interface with better error handling, progress
+    tracking, and professional output formatting.
+    """
+    try:
+        from .cli.main import main_cli
+        return main_cli()
+    except ImportError:
+        # Fallback to basic CLI if professional CLI dependencies unavailable
+        print("Warning: Professional CLI dependencies not available. Using basic CLI.")
+        print("Install optional dependencies with: pip install colorama tqdm")
+        return cli_main()
+
 
 if __name__ == "__main__":
     exit(main())

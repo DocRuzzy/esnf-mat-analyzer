@@ -16,7 +16,7 @@ For JOSS compliance, this script provides:
 - Clear error reporting
 
 Author: ESNF Mat Analyzer Team
-License: MIT (as specified in LICENSE file)
+License: GPLv3 (as specified in LICENSE file)
 """
 
 import subprocess

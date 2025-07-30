@@ -1,3 +1,11 @@
+
+"""
+Main GUI window for ESNF Mat Analyzer.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
+"""
+
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk

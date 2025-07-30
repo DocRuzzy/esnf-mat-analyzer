@@ -1,5 +1,9 @@
+
 """
 Configuration management for the ESNF Mat Analyzer.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
 
 This module provides functions for loading, saving, and validating configuration
 settings. It handles conversion between the data structures defined in data_types.py
@@ -459,17 +463,55 @@ def save_config(config: Config, config_path: Path) -> None:
 
 def validate_config(config: Config) -> List[str]:
     """
-    Validate a Config object.
-
+    Comprehensively validate a configuration object for scientific analysis workflows.
+    
+    This function performs extensive validation of all configuration parameters
+    to ensure they are within valid ranges and compatible with each other.
+    Invalid configurations can lead to analysis failures or incorrect results.
+    
     Args:
-        config: Config object to validate
-
+        config: Configuration object to validate containing all analysis parameters
+        
     Returns:
-        List of validation error messages (empty if valid)
+        List of validation error messages. Empty list indicates valid configuration.
+        Each error message describes a specific validation failure with suggested
+        corrections where applicable.
+        
+    Examples:
+        >>> config = get_default_config()
+        >>> errors = validate_config(config)
+        >>> if errors:
+        ...     for error in errors:
+        ...         print(f"Configuration error: {error}")
+        >>> else:
+        ...     print("Configuration is valid")
+        
+        >>> # Check specific component
+        >>> config.thickness.saturation_threshold = 300  # Invalid
+        >>> errors = validate_config(config)
+        >>> print(errors[0])
+        saturation_threshold must be between 1 and 255
     """
     errors = []
+    logger = logging.getLogger(__name__)
+    
+    errors = []
+    logger = logging.getLogger(__name__)
+    
+    # Log validation start
+    logger.debug("Starting comprehensive configuration validation")
+    
+    # Validate that config object exists and is correct type
+    if config is None:
+        errors.append("Configuration object cannot be None")
+        return errors
+        
+    if not isinstance(config, Config):
+        errors.append(f"Expected Config object, got {type(config).__name__}")
+        return errors
 
     # Validate ProcessingConfig
+    logger.debug("Validating processing configuration")
     if config.processing.blur_kernel_size < 0:
         errors.append("blur_kernel_size must be non-negative")
     elif (
@@ -484,14 +526,44 @@ def validate_config(config: Config) -> List[str]:
     if config.processing.contrast_beta < -255 or config.processing.contrast_beta > 255:
         errors.append("contrast_beta must be between -255 and 255")
 
+    # Validate background correction parameters
+    if config.processing.basic_correction_n_components < 1:
+        errors.append("basic_correction_n_components must be positive")
+    if config.processing.rolling_ball_radius < 1:
+        errors.append("rolling_ball_radius must be positive")
+    if not (0 < config.processing.restore_percentile < 100):
+        errors.append("restore_percentile must be between 0 and 100")
+    if config.processing.homomorphic_cutoff <= 0:
+        errors.append("homomorphic_cutoff must be positive")
+    if config.processing.homomorphic_g_low <= 0:
+        errors.append("homomorphic_g_low must be positive")
+    if config.processing.homomorphic_g_high <= 0:
+        errors.append("homomorphic_g_high must be positive")
+
     # Validate ThicknessConfig
+    logger.debug("Validating thickness estimation configuration")
     if (
         config.thickness.saturation_threshold <= 0
         or config.thickness.saturation_threshold > 255
     ):
         errors.append("saturation_threshold must be between 1 and 255")
+        
+    if config.thickness.attenuation_coefficient <= 0:
+        errors.append("attenuation_coefficient must be positive")
+        
+    if config.thickness.min_transmittance <= 0 or config.thickness.min_transmittance >= 1:
+        errors.append("min_transmittance must be between 0 and 1 (exclusive)")
+        
+    # Validate thickness range
+    if len(config.thickness.thickness_range_um) != 2:
+        errors.append("thickness_range_um must contain exactly two values")
+    elif config.thickness.thickness_range_um[0] >= config.thickness.thickness_range_um[1]:
+        errors.append("thickness_range_um[0] must be less than thickness_range_um[1]")
+    elif config.thickness.thickness_range_um[0] < 0:
+        errors.append("thickness_range_um values must be non-negative")
 
     # Validate UniformityConfig
+    logger.debug("Validating uniformity analysis configuration")
     if config.uniformity.num_radial_lines <= 0:
         errors.append("num_radial_lines must be positive")
 
@@ -545,13 +617,71 @@ def validate_config(config: Config) -> List[str]:
     if config.thickness.attenuation_coefficient <= 0:
         errors.append("attenuation_coefficient must be positive")
 
-    # Validate new UniformityConfig fields
+    # Validate GLCM and LBP parameters
     if not all(d > 0 for d in config.uniformity.glcm_distances):
         errors.append("All glcm_distances must be positive")
     if config.uniformity.lbp_radius < 1:
         errors.append("lbp_radius must be positive")
     if config.uniformity.lbp_points < 1:
         errors.append("lbp_points must be positive")
+
+    # Validate RulerDetectionConfig
+    logger.debug("Validating ruler detection configuration")
+    if config.ruler_detection.min_line_length <= 0:
+        errors.append("min_line_length must be positive")
+    if config.ruler_detection.max_line_gap < 0:
+        errors.append("max_line_gap must be non-negative")
+    if config.ruler_detection.expected_tick_distance_mm <= 0:
+        errors.append("expected_tick_distance_mm must be positive")
+    if config.ruler_detection.canny_threshold1 <= 0:
+        errors.append("canny_threshold1 must be positive")
+    if config.ruler_detection.canny_threshold2 <= 0:
+        errors.append("canny_threshold2 must be positive")
+    if config.ruler_detection.canny_threshold1 >= config.ruler_detection.canny_threshold2:
+        errors.append("canny_threshold1 must be less than canny_threshold2")
+    if config.ruler_detection.hough_threshold <= 0:
+        errors.append("hough_threshold must be positive")
+
+    # Validate ShapeDetectionConfig
+    logger.debug("Validating shape detection configuration")
+    if config.shape_detection.min_area <= 0:
+        errors.append("min_area must be positive")
+    if config.shape_detection.max_area <= config.shape_detection.min_area:
+        errors.append("max_area must be greater than min_area")
+    if not (0 < config.shape_detection.approx_epsilon_ratio < 1):
+        errors.append("approx_epsilon_ratio must be between 0 and 1")
+    if config.shape_detection.min_vertices < 3:
+        errors.append("min_vertices must be at least 3")
+    if config.shape_detection.max_vertices <= config.shape_detection.min_vertices:
+        errors.append("max_vertices must be greater than min_vertices")
+
+    # Validate VisualizationConfig percentile ranges
+    if len(config.visualization.heatmap_percentile_range) != 2:
+        errors.append("heatmap_percentile_range must contain exactly two values")
+    elif (config.visualization.heatmap_percentile_range[0] >= 
+          config.visualization.heatmap_percentile_range[1]):
+        errors.append("heatmap_percentile_range[0] must be less than heatmap_percentile_range[1]")
+    elif (config.visualization.heatmap_percentile_range[0] < 0 or 
+          config.visualization.heatmap_percentile_range[1] > 100):
+        errors.append("heatmap_percentile_range values must be between 0 and 100")
+
+    # Validate output directory
+    if config.output_dir is not None:
+        try:
+            output_path = Path(config.output_dir)
+            # Try to create directory if it doesn't exist (validation only)
+            if not output_path.exists():
+                logger.debug(f"Output directory {output_path} will be created when needed")
+        except Exception as e:
+            errors.append(f"Invalid output_dir path: {e}")
+
+    # Log validation completion
+    if errors:
+        logger.warning(f"Configuration validation found {len(errors)} errors")
+        for i, error in enumerate(errors, 1):
+            logger.warning(f"  {i}. {error}")
+    else:
+        logger.debug("Configuration validation completed successfully")
 
     return errors
 

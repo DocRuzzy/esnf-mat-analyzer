@@ -53,6 +53,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cli = [
+    "colorama>=0.4.0",
+    "tqdm>=4.60.0",
+]
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.10",
@@ -73,6 +77,15 @@ docs = [
     "sphinx-rtd-theme>=0.5",
     "sphinx-autodoc-typehints>=1.11",
     "myst-parser>=0.15",
+]
+full = [
+    "colorama>=0.4.0",
+    "tqdm>=4.60.0",
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.800",
 ]
 
 [project.urls]

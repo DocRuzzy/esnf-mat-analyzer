@@ -1,3 +1,11 @@
+
+"""
+Uniformity metrics for ESNF Mat Analyzer.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
+"""
+
 import numpy as np
 from esnf_mat_analyzer.core.interfaces import IUniformityMetric
 from esnf_mat_analyzer.core.data_types import UniformityConfig
