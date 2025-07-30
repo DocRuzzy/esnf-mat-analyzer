@@ -1,12 +1,17 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, simpledialog
+from tkinter import ttk, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
 from pathlib import Path
 import math
+import numpy as np
+import cv2
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from esnf_mat_analyzer.main import create_config, setup_dependencies
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+from esnf_mat_analyzer.main import setup_dependencies
 from esnf_mat_analyzer.visualization.visualization import Visualizer
-from esnf_mat_analyzer.core.data_types import VisualizationConfig
+from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
+from esnf_mat_analyzer.config.config_manager import get_default_config
 
 class MainWindow(tk.Tk):
     def __init__(self):
@@ -82,6 +87,64 @@ class MainWindow(tk.Tk):
             variable=self.auto_range_var
         )
         self.auto_range_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+
+        # Background correction method selection
+        self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction")
+        self.bg_method_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.bg_method_var = tk.StringVar(value="none")
+        bg_methods = [
+            ("Default (Normalization)", "none"),
+            ("BASIC (Robust)", "basic"),
+            ("Rolling Ball", "rolling_ball"),
+            ("RESTORE", "restore"),
+            ("Homomorphic", "homomorphic")
+        ]
+
+        for text, value in bg_methods:
+            ttk.Radiobutton(
+                self.bg_method_frame,
+                text=text,
+                variable=self.bg_method_var,
+                value=value,
+                command=self.on_bg_method_change
+            ).pack(anchor=tk.W, padx=5, pady=1)
+
+        # Preview button for background methods
+        self.preview_bg_button = ttk.Button(
+            self.bg_method_frame,
+            text="Preview Methods",
+            command=self.preview_background_methods
+        )
+        self.preview_bg_button.pack(padx=5, pady=5)
+
+        # Thickness model selection
+        self.thickness_model_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Model")
+        self.thickness_model_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.thickness_model_var = tk.StringVar(value="beer_lambert")
+        thickness_models = [
+            ("Beer-Lambert (Physics)", "beer_lambert"),
+            ("Linear (Legacy)", "linear"),
+            ("Logarithmic", "logarithmic"),
+            ("Exponential", "exponential")
+        ]
+
+        for text, value in thickness_models:
+            ttk.Radiobutton(
+                self.thickness_model_frame,
+                text=text,
+                variable=self.thickness_model_var,
+                value=value
+            ).pack(anchor=tk.W, padx=5, pady=1)
+
+        # Add model comparison button
+        self.compare_models_button = ttk.Button(
+            self.thickness_model_frame,
+            text="Compare Models",
+            command=self.compare_thickness_models
+        )
+        self.compare_models_button.pack(padx=5, pady=5)
 
         self.analyze_button = ttk.Button(
             self.analysis_frame, text="Analyze", command=self.analyze
@@ -446,7 +509,7 @@ class MainWindow(tk.Tk):
         filepath = self.selected_files[index]
 
         # Create config and analyzer
-        config = create_config()
+        config = get_default_config()
         
         # Update background leveling setting based on checkbox
         config.processing.leveling.enabled = self.background_leveling_var.get()
@@ -511,34 +574,429 @@ class MainWindow(tk.Tk):
                 self.last_analysis_result.saturation_mask
             )
             fig.canvas.draw()
-            heatmap = Image.frombytes(
+            
+            # Convert matplotlib figure to image
+            fig_img = Image.frombytes(
                 "RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb()
             )
-            heatmap = heatmap.resize(img.size)
-            img = Image.blend(img, heatmap, alpha=0.5)
-
+            # Here you could blend img and fig_img if needed
+            img = fig_img
+            
         img.save(filepath)
         print(f"Image saved to {filepath}")
+
+    def on_bg_method_change(self):
+        """Called when background correction method is changed."""
+        # Optional: Could show a brief description or update UI
+        pass
+
+    def preview_background_methods(self):
+        """Show a comparison of different background correction methods."""
+        if not self.current_image:
+            tk.messagebox.showwarning("Warning", "Please select an image first.")
+            return
+
+        # Create preview window
+        preview_window = tk.Toplevel(self)
+        preview_window.title("Background Correction Methods Comparison")
+        preview_window.geometry("1400x800")
+
+        # Create notebook for tabs
+        notebook = ttk.Notebook(preview_window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Load and preprocess the image
+        try:
+            import cv2
+            raw_image = cv2.imread(str(self.current_image))
+            raw_image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
+            gray_image = cv2.cvtColor(raw_image_rgb, cv2.COLOR_RGB2GRAY)
+
+            # Define methods to test
+            methods = [
+                ("Default (Normalization)", "none", self._apply_default_correction),
+                ("BASIC (Robust)", "basic", self._apply_basic_correction),
+                ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction),
+                ("RESTORE", "restore", self._apply_restore_correction),
+                ("Homomorphic", "homomorphic", self._apply_homomorphic_correction)
+            ]
+
+            for method_name, method_id, method_func in methods:
+                # Create tab for this method
+                tab_frame = ttk.Frame(notebook)
+                notebook.add(tab_frame, text=method_name)
+
+                # Apply the background correction method
+                try:
+                    corrected_image = method_func(gray_image)
+                    
+                    # Create side-by-side comparison
+                    fig = Figure(figsize=(12, 5))
+                    
+                    # Original image
+                    ax1 = fig.add_subplot(121)
+                    ax1.imshow(gray_image, cmap='gray')
+                    ax1.set_title('Original Image')
+                    ax1.axis('off')
+                    
+                    # Corrected image
+                    ax2 = fig.add_subplot(122)
+                    ax2.imshow(corrected_image, cmap='viridis')
+                    ax2.set_title(f'{method_name} Corrected')
+                    ax2.axis('off')
+                    
+                    # Add statistics
+                    stats_text = self._get_correction_stats(gray_image, corrected_image)
+                    fig.suptitle(f'{method_name}\n{stats_text}', fontsize=10)
+                    
+                    # Embed plot in tab
+                    canvas = FigureCanvasTkAgg(fig, tab_frame)
+                    canvas.draw()
+                    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                    
+                    # Add selection button
+                    select_button = ttk.Button(
+                        tab_frame,
+                        text=f"Use {method_name}",
+                        command=lambda m=method_id: self._select_bg_method(m, preview_window)
+                    )
+                    select_button.pack(pady=10)
+
+                except Exception as e:
+                    # Show error in tab
+                    error_label = ttk.Label(tab_frame, text=f"Error: {str(e)}")
+                    error_label.pack(expand=True)
+
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to create preview: {str(e)}")
+
+    def _apply_default_correction(self, image):
+        """Apply default normalization correction."""
+        kernel_size = 25
+        background = cv2.medianBlur(image, kernel_size)
+        image_float = image.astype(np.float32)
+        background_float = background.astype(np.float32)
+        epsilon = 1.0
+        corrected = (image_float / (background_float + epsilon)) * 128.0
+        return np.clip(corrected, 0, 255).astype(np.uint8)
+
+    def _apply_basic_correction(self, image):
+        """Apply BASIC correction."""
+        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        return processor.basic_correction(image, 1)
+
+    def _apply_rolling_ball_correction(self, image):
+        """Apply rolling ball correction."""
+        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        return processor.rolling_ball_3d(image, 50)
+
+    def _apply_restore_correction(self, image):
+        """Apply RESTORE correction."""
+        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        return processor.restore_method(image, 5.0)
+
+    def _apply_homomorphic_correction(self, image):
+        """Apply homomorphic correction."""
+        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        return processor.homomorphic_filter(image, 30, 0.5, 2.0)
+
+    def _get_correction_stats(self, original, corrected):
+        """Get statistical comparison of correction methods."""
+        orig_stats = f"Original: {original.min()}-{original.max()}, μ={original.mean():.1f}"
+        corr_stats = f"Corrected: {corrected.min()}-{corrected.max()}, μ={corrected.mean():.1f}"
+        sat_rate = 100 * np.sum(corrected >= 240) / corrected.size
+        return f"{orig_stats}\n{corr_stats}\nSaturation: {sat_rate:.1f}%"
+
+    def _select_bg_method(self, method_id, preview_window):
+        """Select a background correction method and close preview."""
+        self.bg_method_var.set(method_id)
+        preview_window.destroy()
+        tk.messagebox.showinfo("Selection", f"Background correction method updated to: {method_id}")
+
+    def compare_thickness_models(self):
+        """Show comparison of different thickness models."""
+        if not self.current_image:
+            tk.messagebox.showwarning("Warning", "Please select an image first.")
+            return
+
+        try:
+            # Quick analysis with current image
+            from esnf_mat_analyzer.processing.physics_based_thickness import MultiModelThicknessEstimator
+            
+            # Convert PIL to numpy
+            img_array = np.array(self.current_image.convert('L'))
+            
+            estimator = MultiModelThicknessEstimator()
+            results = estimator.validate_model_performance(img_array)
+            
+            # Create results window
+            results_window = tk.Toplevel(self)
+            results_window.title("Thickness Model Comparison")
+            results_window.geometry("800x600")
+            
+            # Create text widget with results
+            text_widget = tk.Text(results_window, wrap=tk.WORD, font=('Courier', 10))
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Format results
+            comparison_text = "THICKNESS MODEL COMPARISON\n" + "="*50 + "\n\n"
+            
+            for model_name, stats in results.items():
+                comparison_text += f"{model_name.upper()} MODEL:\n"
+                comparison_text += f"  Mean Thickness: {stats['mean_thickness']:.2f}\n"
+                comparison_text += f"  Std Deviation: {stats['std_thickness']:.2f}\n"
+                comparison_text += f"  Dynamic Range: {stats['dynamic_range']:.2f}\n"
+                comparison_text += f"  Signal/Noise: {stats['signal_to_noise']:.2f}\n"
+                comparison_text += f"  Coeff. of Variation: {stats['coefficient_of_variation']:.3f}\n\n"
+            
+            comparison_text += "\nRECOMMENDATION:\n"
+            comparison_text += "Beer-Lambert model is recommended for physics-based analysis\n"
+            comparison_text += "with improved accuracy for fiber mat thickness estimation.\n"
+            
+            text_widget.insert(tk.END, comparison_text)
+            text_widget.config(state=tk.DISABLED)
+            
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Model comparison failed: {str(e)}")
+
+    def get_roi_coordinates(self):
+        """Get ROI coordinates from canvas rectangle."""
+        if not self.rect:
+            return None
+            
+        # Get ROI from canvas (in scaled coordinates)
+        x1, y1, x2, y2 = self.canvas.coords(self.rect)
+        
+        # Convert scaled coordinates back to original image coordinates
+        orig_x1 = int(x1 / self.scale_factor)
+        orig_y1 = int(y1 / self.scale_factor)
+        orig_x2 = int(x2 / self.scale_factor)
+        orig_y2 = int(y2 / self.scale_factor)
+        
+        # Ensure coordinates are within image bounds
+        if self.current_image:
+            img_width, img_height = self.current_image.size
+            orig_x1 = max(0, min(orig_x1, img_width))
+            orig_y1 = max(0, min(orig_y1, img_height))
+            orig_x2 = max(0, min(orig_x2, img_width))
+            orig_y2 = max(0, min(orig_y2, img_height))
+        
+        return (orig_x1, orig_y1, orig_x2, orig_y2)
+
+    def analyze(self):
+        """Modified analyze method to use selected background correction method and thickness model."""
+        if not self.current_image:
+            print("No image selected.")
+            return
+
+        # Get ROI coordinates
+        roi = self.get_roi_coordinates()
+        if not roi:
+            print("No ROI selected.")
+            return
+
+        try:
+            # Create config with selected methods
+            config = get_default_config()
+            
+            # Background correction method
+            method_mapping = {
+                "none": BackgroundCorrectionMethod.NONE,
+                "basic": BackgroundCorrectionMethod.BASIC,
+                "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
+                "restore": BackgroundCorrectionMethod.RESTORE,
+                "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+            }
+            
+            selected_bg_method = self.bg_method_var.get()
+            config.processing.background_correction_method = method_mapping.get(
+                selected_bg_method, BackgroundCorrectionMethod.NONE
+            )
+            
+            # Thickness model selection
+            thickness_mapping = {
+                "beer_lambert": ThicknessModelType.BEER_LAMBERT,
+                "linear": ThicknessModelType.LINEAR,
+                "logarithmic": ThicknessModelType.LOGARITHMIC,
+                "exponential": ThicknessModelType.EXPONENTIAL
+            }
+            
+            selected_thickness_model = self.thickness_model_var.get()
+            config.thickness.model_type = thickness_mapping.get(
+                selected_thickness_model, ThicknessModelType.BEER_LAMBERT
+            )
+            
+            # Apply other settings
+            config.processing.leveling.enabled = self.background_leveling_var.get()
+
+            # Get selected file path
+            selection = self.file_listbox.curselection()
+            if not selection:
+                print("No file selected")
+                return
+            index = selection[0]
+            filepath = self.selected_files[index]
+
+            # Create analyzer with updated config
+            analyzer = setup_dependencies(config)
+
+            # Run analysis
+            print(f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}")
+            self.last_analysis_result = analyzer.process_image(
+                Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale
+            )
+            print("Analysis complete.")
+
+            # Display results
+            self.display_results(self.last_analysis_result)
+
+        except Exception as e:
+            print(f"Analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def export_image(self):
+        """Export the current image with optional heatmap overlay."""
+        if not self.current_image:
+            print("No image to export.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg"), ("All Files", "*.*")],
+        )
+        if not filepath:
+            return
+
+        # Create an image from the current display
+        try:
+            # Simple export of the current image for now
+            pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
+            pil_image.save(filepath)
+            print(f"Image saved to {filepath}")
+        except Exception as e:
+            print(f"Export failed: {e}")
 
     def display_results(self, result):
         # Create a new window to display results
         results_window = tk.Toplevel(self)
         results_window.title("Analysis Results")
-        results_window.geometry("600x400")
+        results_window.geometry("800x600")
 
-        text = tk.Text(results_window, wrap=tk.WORD)
-        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create notebook for tabbed results
+        notebook = ttk.Notebook(results_window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Format and insert results
-        formatted_result = f"Image: {result.image_path}\n"
-        formatted_result += f"Processing Time: {result.processing_time:.2f}s\n"
+        # Basic Results Tab
+        basic_frame = ttk.Frame(notebook)
+        notebook.add(basic_frame, text="Basic Metrics")
+        
+        basic_text = tk.Text(basic_frame, wrap=tk.WORD)
+        basic_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Format basic results
+        basic_result = f"Image: {result.image_path}\n"
+        basic_result += f"Processing Time: {result.processing_time:.2f}s\n"
         if result.spatial_scale_pixels_per_mm:
-            formatted_result += f"Spatial Scale: {result.spatial_scale_pixels_per_mm:.2f} pixels/mm\n"
-        formatted_result += "\nMetrics:\n"
-        for name, value in result.metrics.items():
-            formatted_result += f"  {name}: {value:.4f}\n"
-        text.insert(tk.END, formatted_result)
-        text.config(state=tk.DISABLED)
+            basic_result += f"Spatial Scale: {result.spatial_scale_pixels_per_mm:.2f} pixels/mm\n"
+        
+        basic_result += "\nTraditional Uniformity Metrics:\n"
+        traditional_metrics = {k: v for k, v in result.metrics.items() 
+                             if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))}
+        for name, value in traditional_metrics.items():
+            if isinstance(value, float) and not math.isnan(value):
+                basic_result += f"  {name}: {value:.4f}\n"
+            else:
+                basic_result += f"  {name}: {value}\n"
+        
+        basic_text.insert(tk.END, basic_result)
+        basic_text.config(state=tk.DISABLED)
+
+        # Mat-Scale Analysis Tab
+        mat_frame = ttk.Frame(notebook)
+        notebook.add(mat_frame, text="Mat-Scale Analysis")
+        
+        mat_text = tk.Text(mat_frame, wrap=tk.WORD)
+        mat_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Format mat-scale results
+        mat_result = "Mat-Scale Uniformity Analysis\n"
+        mat_result += "=" * 40 + "\n\n"
+        
+        # Overall mat uniformity score
+        if 'overall_mat_uniformity' in result.metrics:
+            score = result.metrics['overall_mat_uniformity']
+            if isinstance(score, float) and not math.isnan(score):
+                mat_result += f"Overall Mat Uniformity Score: {score:.4f}\n"
+                mat_result += f"Uniformity Rating: {self._get_uniformity_rating(score)}\n\n"
+        
+        # Anisotropy metrics
+        anisotropy_metrics = {k: v for k, v in result.metrics.items() if k.startswith('anisotropy_')}
+        if anisotropy_metrics:
+            mat_result += "FFT-Based Anisotropy Analysis:\n"
+            mat_result += "-" * 30 + "\n"
+            for name, value in anisotropy_metrics.items():
+                clean_name = name.replace('anisotropy_', '').replace('_', ' ').title()
+                if isinstance(value, float) and not math.isnan(value):
+                    mat_result += f"  {clean_name}: {value:.4f}\n"
+                else:
+                    mat_result += f"  {clean_name}: {value}\n"
+            mat_result += "\n"
+        
+        # Texture metrics
+        texture_metrics = {k: v for k, v in result.metrics.items() if k.startswith('texture_')}
+        if texture_metrics:
+            mat_result += "GLCM Texture Analysis:\n"
+            mat_result += "-" * 25 + "\n"
+            for name, value in texture_metrics.items():
+                clean_name = name.replace('texture_', '').replace('_', ' ').title()
+                if isinstance(value, float) and not math.isnan(value):
+                    mat_result += f"  {clean_name}: {value:.4f}\n"
+                else:
+                    mat_result += f"  {clean_name}: {value}\n"
+            mat_result += "\n"
+        
+        # Power spectral density metrics
+        psd_metrics = {k: v for k, v in result.metrics.items() if k.startswith('psd_')}
+        if psd_metrics:
+            mat_result += "Power Spectral Density Analysis:\n"
+            mat_result += "-" * 35 + "\n"
+            for name, value in psd_metrics.items():
+                clean_name = name.replace('psd_', '').replace('_', ' ').title()
+                if isinstance(value, float) and not math.isnan(value):
+                    mat_result += f"  {clean_name}: {value:.4f}\n"
+                else:
+                    mat_result += f"  {clean_name}: {value}\n"
+        
+        # Add interpretation guide
+        mat_result += "\n" + "=" * 40 + "\n"
+        mat_result += "Interpretation Guide:\n"
+        mat_result += "- Anisotropy Index: Lower values indicate more isotropic (uniform) structure\n"
+        mat_result += "- Homogeneity: Higher values indicate more uniform texture\n"
+        mat_result += "- Energy: Higher values indicate more ordered structure\n"
+        mat_result += "- Correlation: Measures linear dependencies in texture\n"
+        mat_result += "- Contrast: Lower values indicate smoother texture\n"
+        mat_result += "- PSD Uniformity: Higher values indicate more uniform frequency distribution\n"
+        
+        mat_text.insert(tk.END, mat_result)
+        mat_text.config(state=tk.DISABLED)
+
+    def _get_uniformity_rating(self, score):
+        """Convert uniformity score to a descriptive rating."""
+        if score >= 0.8:
+            return "Excellent"
+        elif score >= 0.6:
+            return "Good"
+        elif score >= 0.4:
+            return "Fair"
+        elif score >= 0.2:
+            return "Poor"
+        else:
+            return "Very Poor"
 
 
 if __name__ == "__main__":

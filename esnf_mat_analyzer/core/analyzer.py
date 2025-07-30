@@ -101,6 +101,8 @@ class NanoFiberAnalyzer(AnalyzerInterface):
 
         # 6. Calculate Uniformity Metrics
         metrics: Dict[str, float] = {}
+        
+        # Traditional uniformity metrics
         for metric_calculator in self.uniformity_metrics:
             try:
                 metric_value = metric_calculator.calculate(thickness_map, mask, None)
@@ -109,6 +111,16 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             except Exception as e:
                 self.logger.error(f"Error calculating metric {metric_calculator.name}: {e}", exc_info=True)
                 metrics[metric_calculator.name] = float('nan')
+        
+        # Mat-scale uniformity analysis
+        try:
+            from ..analysis.uniformity_metrics import MatUniformityAnalyzer
+            mat_analyzer = MatUniformityAnalyzer(self.config.uniformity)
+            mat_metrics = mat_analyzer.analyze_mat_uniformity(thickness_map, mask)
+            metrics.update(mat_metrics)
+            self.logger.debug(f"Mat-scale uniformity metrics calculated: {len(mat_metrics)} metrics")
+        except Exception as e:
+            self.logger.error(f"Error calculating mat-scale uniformity metrics: {e}", exc_info=True)
 
         processing_duration = time.time() - processing_start_time
         self.logger.info(f"Image processing completed in {processing_duration:.2f} seconds.")

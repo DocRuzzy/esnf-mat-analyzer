@@ -1,52 +1,50 @@
 import numpy as np
-from sklearn.decomposition import NMF
+import cv2
 
 class AdvancedBackgroundProcessor:
     """Advanced background correction using state-of-the-art methods."""
 
     def basic_correction(self, image: np.ndarray, n_components: int = 1) -> np.ndarray:
         """
-        BaSiC (Background and Shading Correction) implementation using NMF.
-        This is a simplified version and may not fully replicate the original BaSiC algorithm.
+        BaSiC-inspired background correction using robust background estimation.
+        This is a simplified version that uses percentile-based background correction.
         """
-        original_shape = image.shape
-        # NMF requires a 2D array, where rows are samples and columns are features.
-        # We treat each pixel as a sample, and the pixel value as a single feature.
-        image_reshaped = image.reshape(-1, 1)
-
-        # Apply Non-negative Matrix Factorization
-        model = NMF(n_components=n_components, init='random', random_state=0)
-        W = model.fit_transform(image_reshaped)
-        H = model.components_
-
-        # The background is reconstructed from the NMF components.
-        background = np.dot(W, H).reshape(original_shape)
-
-        # Correct the image by subtracting the background
-        corrected_image = image - background
-
-        # Normalize the image to the original range [0, 255]
-        corrected_image = np.clip(corrected_image, 0, 255)
-
+        # Convert to float for processing
+        image_float = image.astype(np.float32)
+        
+        # Use robust background estimation instead of NMF for stability
+        # Estimate background using a large median filter
+        background = cv2.medianBlur(image, 51)  # Large kernel for background
+        
+        # Convert background to float
+        background_float = background.astype(np.float32)
+        
+        # Subtract background and add offset to maintain positive values
+        corrected = image_float - background_float + 128.0
+        
+        # Clip to valid range
+        corrected_image = np.clip(corrected, 0, 255)
+        
         return corrected_image.astype(np.uint8)
 
     def rolling_ball_3d(self, image: np.ndarray, radius: int) -> np.ndarray:
         """
-        Enhanced rolling ball with ellipsoid kernels.
-        This is a simplified version and may not fully replicate the original rolling ball algorithm.
+        Rolling ball background correction using morphological operations.
+        This is a simplified version using available OpenCV operations.
         """
-        from scipy.ndimage import grey_opening
-        from skimage.morphology import ball
-
-        # Create a spherical structuring element (kernel)
-        kernel = ball(radius)
-
-        # Perform a grayscale opening operation
-        background = grey_opening(image, structure=kernel)
-
+        # Create a circular structuring element
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius*2+1, radius*2+1))
+        
+        # Perform morphological opening (erosion followed by dilation)
+        # This simulates the rolling ball effect
+        background = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+        
         # Subtract the background from the original image
-        corrected_image = image - background
-
+        corrected_image = cv2.subtract(image, background)
+        
+        # Add offset to ensure positive values
+        corrected_image = cv2.add(corrected_image, 64)
+        
         # Clip the values to the original range [0, 255]
         corrected_image = np.clip(corrected_image, 0, 255)
 

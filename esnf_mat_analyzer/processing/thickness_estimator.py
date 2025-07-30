@@ -5,6 +5,7 @@ from typing import Optional
 
 from esnf_mat_analyzer.core.interfaces import ThicknessEstimatorInterface
 from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType
+from esnf_mat_analyzer.processing.physics_based_thickness import BeerLambertEstimator
 
 class ThicknessEstimator(ThicknessEstimatorInterface):
     """
@@ -21,6 +22,15 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ThicknessEstimator initialized with config: {self.config}")
+        
+        # Initialize Beer-Lambert estimator if needed
+        if config.model_type == ThicknessModelType.BEER_LAMBERT:
+            self.beer_lambert = BeerLambertEstimator(
+                attenuation_coefficient=config.attenuation_coefficient,
+                reference_intensity=config.reference_intensity,
+                min_transmittance=config.min_transmittance,
+                max_thickness_um=config.thickness_range_um[1]
+            )
 
     def estimate(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
@@ -43,7 +53,15 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         # Ensure calculations are done in float to maintain precision
         image_float = image.astype(np.float32)
 
-        if self.config.model_type == ThicknessModelType.LINEAR:
+        if self.config.model_type == ThicknessModelType.BEER_LAMBERT:
+            # Use Beer-Lambert law for physics-based thickness estimation
+            self.logger.info("Using Beer-Lambert law for thickness estimation")
+            thickness_map = self.beer_lambert.estimate_thickness(
+                image,
+                background_corrected=True,
+                spatial_scale_um_per_pixel=self.config.spatial_scale_um_per_pixel
+            )
+        elif self.config.model_type == ThicknessModelType.LINEAR:
             # thickness = a * brightness + b
             thickness_map = self.config.a * image_float + self.config.b
         elif self.config.model_type == ThicknessModelType.LOGARITHMIC:

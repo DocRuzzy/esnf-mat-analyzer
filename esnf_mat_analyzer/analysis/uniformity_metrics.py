@@ -6,15 +6,19 @@ of nanofiber thickness, including:
 - Radial Uniformity Index
 - Gini Coefficient
 - Thickness Range Ratio
+- Mat-scale Anisotropy (FFT-based)
+- Mat-scale Texture (GLCM-based)
+- Power Spectral Density analysis
 """
 
 import numpy as np
 import cv2
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Any
 import logging
 
 from esnf_mat_analyzer.core.interfaces import UniformityMetricInterface
 from esnf_mat_analyzer.core.data_types import UniformityConfig
+from esnf_mat_analyzer.analysis.mat_anisotropy import MatAnisotropyAnalyzer, MatTextureAnalyzer, PowerSpectralDensityAnalyzer
 
 class RadialUniformityIndex(UniformityMetricInterface):
     """
@@ -257,3 +261,136 @@ class ThicknessRangeRatio(UniformityMetricInterface):
             ratio = 1.0
         
         return ratio
+
+
+class MatUniformityAnalyzer:
+    """
+    Comprehensive mat-scale uniformity analyzer that combines multiple metrics.
+    
+    This analyzer provides mat-scale anisotropy, texture, and frequency domain
+    analysis suitable for publication-quality research on fiber mat uniformity.
+    """
+    
+    def __init__(self, config: UniformityConfig):
+        """
+        Initialize the mat uniformity analyzer.
+        
+        Args:
+            config: Configuration parameters for uniformity analysis
+        """
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize specialized analyzers
+        self.anisotropy_analyzer = MatAnisotropyAnalyzer()
+        self.texture_analyzer = MatTextureAnalyzer()
+        self.psd_analyzer = PowerSpectralDensityAnalyzer()
+    
+    def analyze_mat_uniformity(self, thickness_map: np.ndarray, mask: np.ndarray) -> Dict[str, Any]:
+        """
+        Perform comprehensive mat-scale uniformity analysis.
+        
+        Args:
+            thickness_map: 2D thickness map
+            mask: Binary mask indicating the region of interest
+            
+        Returns:
+            Dictionary containing all mat uniformity metrics
+        """
+        results = {}
+        
+        # Extract valid thickness data
+        valid_thickness = thickness_map[mask > 0]
+        if len(valid_thickness) == 0:
+            self.logger.warning("No valid thickness data for mat uniformity analysis")
+            return results
+        
+        try:
+            # FFT-based anisotropy analysis
+            anisotropy_results = self.anisotropy_analyzer.analyze_mat_anisotropy(thickness_map, mask)
+            results.update({f"anisotropy_{key}": value for key, value in anisotropy_results.items()})
+            
+            # GLCM texture analysis
+            texture_results = self.texture_analyzer.analyze_mat_texture(thickness_map, mask)
+            results.update({f"texture_{key}": value for key, value in texture_results.items()})
+            
+            # Power spectral density analysis
+            psd_results = self.psd_analyzer.analyze_psd(thickness_map, mask)
+            results.update({f"psd_{key}": value for key, value in psd_results.items()})
+            
+            # Overall mat uniformity score (composite metric)
+            results['overall_mat_uniformity'] = self._calculate_overall_uniformity(results)
+            
+        except Exception as e:
+            self.logger.error(f"Error in mat uniformity analysis: {e}")
+        
+        return results
+    
+    def _calculate_overall_uniformity(self, results: Dict[str, Any]) -> float:
+        """
+        Calculate an overall mat uniformity score combining multiple metrics.
+        
+        Args:
+            results: Dictionary of individual metric results
+            
+        Returns:
+            Overall uniformity score (0-1, higher is more uniform)
+        """
+        try:
+            # Weight different metrics based on their importance for uniformity
+            # Use actual metric names from results
+            weights = {
+                'anisotropy_anisotropy_index': 0.3,      # Lower anisotropy = more uniform
+                'texture_texture_homogeneity': 0.25,     # Higher homogeneity = more uniform
+                'texture_texture_energy': 0.2,           # Higher energy = more uniform
+                'psd_periodicity_index': 0.25             # Lower periodicity variance = more uniform
+            }
+            
+            weighted_sum = 0.0
+            total_weight = 0.0
+            
+            for metric, weight in weights.items():
+                if metric in results and results[metric] is not None:
+                    value = results[metric]
+                    
+                    # Normalize different metrics appropriately
+                    if 'anisotropy_index' in metric:
+                        # Lower anisotropy = more uniform, so invert
+                        value = 1.0 / (1.0 + value)  # Convert to 0-1 scale, higher = more uniform
+                    elif 'homogeneity' in metric or 'energy' in metric:
+                        # These are already 0-1, higher = more uniform
+                        value = min(1.0, value)
+                    elif 'periodicity_index' in metric:
+                        # Lower periodicity = more uniform
+                        value = 1.0 / (1.0 + value)
+                    
+                    weighted_sum += value * weight
+                    total_weight += weight
+            
+            if total_weight > 0:
+                return weighted_sum / total_weight
+            else:
+                # Fallback: use available metrics
+                available_scores = []
+                
+                # Check anisotropy
+                if 'anisotropy_anisotropy_index' in results:
+                    ani_score = 1.0 / (1.0 + results['anisotropy_anisotropy_index'])
+                    available_scores.append(ani_score)
+                
+                # Check texture homogeneity
+                if 'texture_texture_homogeneity' in results:
+                    available_scores.append(min(1.0, results['texture_texture_homogeneity']))
+                
+                # Check texture energy
+                if 'texture_texture_energy' in results:
+                    available_scores.append(min(1.0, results['texture_texture_energy']))
+                
+                if available_scores:
+                    return np.mean(available_scores)
+                else:
+                    return 0.0
+                
+        except Exception as e:
+            self.logger.error(f"Error calculating overall uniformity score: {e}")
+            return 0.0

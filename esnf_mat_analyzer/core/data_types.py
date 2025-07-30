@@ -121,7 +121,7 @@ class ShapeDetectionConfig:
 class ThicknessConfig:
     """Configuration parameters for thickness estimation."""
 
-    model_type: ThicknessModelType = ThicknessModelType.LINEAR
+    model_type: ThicknessModelType = ThicknessModelType.BEER_LAMBERT
     """Model for converting brightness to thickness."""
 
     a: float = 1.0
@@ -130,8 +130,8 @@ class ThicknessConfig:
     b: float = 0.0
     """Offset for thickness model."""
 
-    saturation_threshold: int = 250
-    """Pixel value threshold for saturation (0-255)."""
+    saturation_threshold: int = 240
+    """Pixel value threshold for saturation (0-255). Values at or above this are considered saturated."""
 
     normalization: bool = False
     """Whether to normalize thickness values to [0, 1] range."""
@@ -139,8 +139,21 @@ class ThicknessConfig:
     calibration_factor: Optional[float] = None
     """Optional calibration factor for converting to absolute units (e.g., nm)."""
 
+    # Beer-Lambert specific parameters
     attenuation_coefficient: float = 0.04778
-    """Attenuation coefficient for Beer-Lambert law."""
+    """Attenuation coefficient for Beer-Lambert law (literature-validated value)."""
+    
+    reference_intensity: Optional[float] = None
+    """Background intensity (I₀). If None, auto-detected from image."""
+    
+    min_transmittance: float = 0.01
+    """Minimum transmittance to prevent log(0) errors."""
+    
+    thickness_range_um: Tuple[float, float] = (0.0, 1000.0)
+    """Valid thickness range in micrometers."""
+    
+    spatial_scale_um_per_pixel: Optional[float] = None
+    """Spatial scale for absolute thickness measurements."""
 
 
 @dataclass

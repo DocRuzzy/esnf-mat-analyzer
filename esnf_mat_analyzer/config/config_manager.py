@@ -22,6 +22,7 @@ from esnf_mat_analyzer.core.data_types import (
     ExportConfig,
     GrayscaleConversionMethod,
     ThicknessModelType,
+    BackgroundCorrectionMethod,
 )
 
 # Setup logging

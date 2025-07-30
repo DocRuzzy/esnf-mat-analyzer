@@ -1,0 +1,97 @@
+# ESNF Mat Analyzer - Background Correction Configuration Examples
+# This file shows how to configure different background correction methods
+
+# Example 1: Default normalization method (recommended for most cases)
+processing:
+  leveling:
+    enabled: true
+    kernel_size: 25
+  background_correction_method: 'none'  # Uses normalization method
+  blur_kernel_size: 5
+  contrast_alpha: 1.5
+  contrast_beta: 0
+  grayscale_conversion: 'weighted'
+
+thickness:
+  model_type: 'linear'
+  a: 1.0
+  b: 0.0
+  saturation_threshold: 240
+  normalization: false
+
+visualization:
+  colormap: 'viridis'
+  auto_range_heatmap: true
+  heatmap_percentile_range: [2.0, 98.0]
+
+output_dir: './output'
+
+---
+# Example 2: Rolling ball method (good for gradual illumination changes)
+processing:
+  leveling:
+    enabled: true
+    kernel_size: 25
+  background_correction_method: 'rolling_ball'
+  rolling_ball_radius: 50  # Adjust radius based on illumination pattern size
+  blur_kernel_size: 5
+  contrast_alpha: 1.5
+  contrast_beta: 0
+
+thickness:
+  saturation_threshold: 240
+
+output_dir: './output'
+
+---
+# Example 3: BASIC method (for complex illumination patterns)
+processing:
+  leveling:
+    enabled: true
+    kernel_size: 25
+  background_correction_method: 'basic'
+  basic_correction_n_components: 1  # Can try 2-3 for more complex patterns
+  blur_kernel_size: 5
+  contrast_alpha: 1.5
+  contrast_beta: 0
+
+thickness:
+  saturation_threshold: 240
+
+output_dir: './output'
+
+---
+# Example 4: RESTORE method (automatic background identification)
+processing:
+  leveling:
+    enabled: true
+    kernel_size: 25
+  background_correction_method: 'restore'
+  restore_percentile: 5.0  # Percentage of darkest pixels used as background
+  blur_kernel_size: 5
+  contrast_alpha: 1.5
+  contrast_beta: 0
+
+thickness:
+  saturation_threshold: 240
+
+output_dir: './output'
+
+---
+# Example 5: Homomorphic filter (frequency domain correction)
+processing:
+  leveling:
+    enabled: true
+    kernel_size: 25
+  background_correction_method: 'homomorphic'
+  homomorphic_cutoff: 30    # Higher = more background removal
+  homomorphic_g_low: 0.5    # Gain for low frequencies (background)
+  homomorphic_g_high: 2.0   # Gain for high frequencies (details)
+  blur_kernel_size: 5
+  contrast_alpha: 1.5
+  contrast_beta: 0
+
+thickness:
+  saturation_threshold: 240
+
+output_dir: './output'

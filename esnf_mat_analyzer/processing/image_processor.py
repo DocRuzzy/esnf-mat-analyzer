@@ -104,11 +104,44 @@ class ImageProcessor(ImageProcessorInterface):
         return adjusted_image
 
     def _apply_leveling(self, image: np.ndarray) -> np.ndarray:
-        """Applies background leveling using a median blur."""
+        """
+        Applies background correction to handle non-uniform illumination.
+        
+        This method preserves the natural relationship where:
+        - White/bright areas (fiber accumulation) remain high values
+        - Dark areas (background) become low values 
+        - Non-uniform illumination is corrected based on the selected method
+        """
         if not self.config.leveling.enabled:
             return image
 
-        self.logger.debug("Applying background leveling.")
+        method = getattr(self.config, 'background_correction_method', None)
+        
+        if method is None or method.name == 'NONE':
+            # Use the default normalization method for backward compatibility
+            return self._apply_normalization_correction(image)
+        
+        from ..processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        
+        if method.name == 'BASIC':
+            return processor.basic_correction(image, self.config.basic_correction_n_components)
+        elif method.name == 'ROLLING_BALL':
+            return processor.rolling_ball_3d(image, self.config.rolling_ball_radius)
+        elif method.name == 'RESTORE':
+            return processor.restore_method(image, self.config.restore_percentile)
+        elif method.name == 'HOMOMORPHIC':
+            return processor.homomorphic_filter(image, self.config.homomorphic_cutoff, 
+                                               self.config.homomorphic_g_low, self.config.homomorphic_g_high)
+        else:
+            self.logger.warning(f"Unknown background correction method: {method}, using default")
+            return self._apply_normalization_correction(image)
+            
+    def _apply_normalization_correction(self, image: np.ndarray) -> np.ndarray:
+        """
+        Applies the default normalization-based background correction.
+        """
+        self.logger.debug("Applying normalization-based background leveling.")
         kernel_size = self.config.leveling.kernel_size
 
         # Ensure kernel size is odd
@@ -117,12 +150,19 @@ class ImageProcessor(ImageProcessorInterface):
 
         # Estimate background with a median blur
         background = cv2.medianBlur(image, kernel_size)
-
-        # Subtract background
-        leveled_image = cv2.subtract(image, background)
-
-        # Invert back
-        leveled_image = cv2.bitwise_not(leveled_image)
+        
+        # Convert to float to prevent overflow/underflow issues
+        image_float = image.astype(np.float32)
+        background_float = background.astype(np.float32)
+        
+        # Proper background correction: normalize by the background
+        # This preserves bright areas as bright and corrects for illumination variation
+        # Use a small offset to avoid division by zero
+        epsilon = 1.0
+        corrected = (image_float / (background_float + epsilon)) * 128.0
+        
+        # Clip to valid range and convert back to uint8
+        leveled_image = np.clip(corrected, 0, 255).astype(np.uint8)
 
         self.logger.debug("Background leveling complete.")
         return leveled_image
