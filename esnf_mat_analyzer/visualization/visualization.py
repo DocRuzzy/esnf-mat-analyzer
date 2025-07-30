@@ -6,14 +6,15 @@ and uniformity metrics, including heatmaps, radial profiles, and metric plots.
 """
 
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 from typing import Tuple, Dict, Optional, Any, List
 import logging
 
-from nanofiber_analyzer.core.interfaces import VisualizerInterface
-from nanofiber_analyzer.config.config_manager import VisualizationConfig
+from esnf_mat_analyzer.core.interfaces import VisualizerInterface
+from esnf_mat_analyzer.core.data_types import VisualizationConfig
 
 class Visualizer(VisualizerInterface):
     """
@@ -55,7 +56,20 @@ class Visualizer(VisualizerInterface):
         cmap = plt.get_cmap(self.config.colormap)
         
         # Create heatmap
-        im = ax.imshow(masked_thickness, cmap=cmap)
+        # Calculate reasonable color limits based on the actual data
+        if self.config.auto_range_heatmap:
+            valid_data = masked_thickness.compressed()  # Get non-masked values
+            if len(valid_data) > 0:
+                # Use configurable percentiles to avoid extreme outliers affecting the color scale
+                min_percentile, max_percentile = self.config.heatmap_percentile_range
+                vmin = np.percentile(valid_data, min_percentile)
+                vmax = np.percentile(valid_data, max_percentile)
+            else:
+                vmin, vmax = None, None
+        else:
+            vmin, vmax = None, None
+        
+        im = ax.imshow(masked_thickness, cmap=cmap, vmin=vmin, vmax=vmax)
         
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax)
@@ -88,6 +102,39 @@ class Visualizer(VisualizerInterface):
         
         return fig
     
+    def create_shape_visualization(self, image: np.ndarray, contour: np.ndarray) -> Figure:
+        """
+        Create a visualization of the detected shape on the original image.
+
+        Args:
+            image: The original image.
+            contour: The detected contour of the mat.
+
+        Returns:
+            Matplotlib Figure object
+        """
+        self.logger.debug("Creating shape visualization")
+
+        # Create a copy of the image to avoid modifying the original
+        vis_image = image.copy()
+
+        # Convert to color if grayscale
+        if len(vis_image.shape) == 2:
+            vis_image = cv2.cvtColor(vis_image, cv2.COLOR_GRAY2RGB)
+
+        # Draw contour outline
+        cv2.drawContours(vis_image, [contour], -1, (0, 255, 0), 2)
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=self.config.figure_size)
+        ax.imshow(cv2.cvtColor(vis_image, cv2.COLOR_BGR2RGB))
+        ax.set_title('Detected Mat Shape')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+
+        return fig
+
     def create_radial_profile(self, thickness_map: np.ndarray, mask: np.ndarray, 
                              center: Tuple[int, int]) -> Figure:
         """

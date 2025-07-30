@@ -12,25 +12,30 @@ import json
 from typing import Dict, Any
 
 # Import configuration and interfaces
-from nanofiber_analyzer.config.config_manager import (
+from esnf_mat_analyzer.core.data_types import ( # Changed source
     Config,
     ProcessingConfig,
-    CircleDetectionConfig,
+    ShapeDetectionConfig,
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
+    RulerDetectionConfig,
+    ExportConfig, # Assuming ExportConfig is also in data_types.py
+    GrayscaleConversionMethod,
+    ThicknessModelType,
 )
+# Potentially, if config_manager.py had actual loading functions:
+# from nanofiber_analyzer.config.config_manager import actual_load_config_function
 
 # Import implementations
-from nanofiber_analyzer.processing.image_processor import ImageProcessor
-from nanofiber_analyzer.processing.circle_detector import CircleDetector
-from nanofiber_analyzer.processing.thickness_estimator import ThicknessEstimator
-from nanofiber_analyzer.analysis.radial_uniformity import RadialUniformityIndex
-from nanofiber_analyzer.analysis.gini_coefficient import GiniCoefficient
-from nanofiber_analyzer.analysis.thickness_ratio import ThicknessRangeRatio
-from nanofiber_analyzer.visualization.visualizer import Visualizer
-from nanofiber_analyzer.utils.data_exporter import DataExporter
-from nanofiber_analyzer.core.analyzer import NanoFiberAnalyzer
+from esnf_mat_analyzer.processing.image_processor import ImageProcessor # Corrected path
+from esnf_mat_analyzer.processing.shape_detector import ShapeDetector # Use ShapeDetector instead of CircleDetector
+from esnf_mat_analyzer.processing.thickness_estimator import ThicknessEstimator # Corrected path
+from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
+from esnf_mat_analyzer.analysis.uniformity_metrics import RadialUniformityIndex, GiniCoefficient, ThicknessRangeRatio # Import from uniformity_metrics
+from esnf_mat_analyzer.visualization.visualization import Visualizer
+from esnf_mat_analyzer.utils.data_exporter import DataExporter
+from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:
@@ -60,30 +65,48 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
     if config_data is None:
         config_data = {}
 
+    # Helper function to convert string to enum
+    def get_grayscale_method(method_str: str) -> GrayscaleConversionMethod:
+        method_map = {
+            "weighted": GrayscaleConversionMethod.WEIGHTED,
+            "average": GrayscaleConversionMethod.AVERAGE,
+            "luminance": GrayscaleConversionMethod.LUMINANCE,
+        }
+        return method_map.get(method_str.lower(), GrayscaleConversionMethod.WEIGHTED)
+
+    def get_thickness_model(model_str: str) -> ThicknessModelType:
+        model_map = {
+            "linear": ThicknessModelType.LINEAR,
+            "logarithmic": ThicknessModelType.LOGARITHMIC,
+            "exponential": ThicknessModelType.EXPONENTIAL,
+        }
+        return model_map.get(model_str.lower(), ThicknessModelType.LINEAR)
+
     # Create processing config
+    grayscale_method_str = config_data.get("processing", {}).get("grayscale_conversion", "weighted")
     processing_config = ProcessingConfig(
         blur_kernel_size=config_data.get("processing", {}).get("blur_kernel_size", 5),
         contrast_alpha=config_data.get("processing", {}).get("contrast_alpha", 1.5),
         contrast_beta=config_data.get("processing", {}).get("contrast_beta", 0),
-        grayscale_conversion=config_data.get("processing", {}).get(
-            "grayscale_conversion", "weighted"
-        ),
+        grayscale_conversion=get_grayscale_method(grayscale_method_str) if isinstance(grayscale_method_str, str) else GrayscaleConversionMethod.WEIGHTED,
     )
 
-    # Create circle detection config
-    circle_detection_config = CircleDetectionConfig(
-        min_radius=config_data.get("circle_detection", {}).get("min_radius", 50),
-        max_radius=config_data.get("circle_detection", {}).get("max_radius", 500),
-        detection_method=config_data.get("circle_detection", {}).get(
-            "detection_method", "hough"
+    # Create shape detection config
+    shape_detection_config = ShapeDetectionConfig(
+        min_area=config_data.get("shape_detection", {}).get("min_area", 100),
+        max_area=config_data.get("shape_detection", {}).get("max_area", 50000),
+        detection_method=config_data.get("shape_detection", {}).get(
+            "detection_method", "contour"
         ),
-        param1=config_data.get("circle_detection", {}).get("param1", 50),
-        param2=config_data.get("circle_detection", {}).get("param2", 30),
+        approx_epsilon_ratio=config_data.get("shape_detection", {}).get("approx_epsilon_ratio", 0.02),
+        min_vertices=config_data.get("shape_detection", {}).get("min_vertices", 3),
+        max_vertices=config_data.get("shape_detection", {}).get("max_vertices", 20),
     )
 
     # Create thickness config
+    thickness_model_str = config_data.get("thickness", {}).get("model_type", "linear")
     thickness_config = ThicknessConfig(
-        model_type=config_data.get("thickness", {}).get("model_type", "linear"),
+        model_type=get_thickness_model(thickness_model_str) if isinstance(thickness_model_str, str) else ThicknessModelType.LINEAR,
         a=config_data.get("thickness", {}).get("a", 1.0),
         b=config_data.get("thickness", {}).get("b", 0.0),
         saturation_threshold=config_data.get("thickness", {}).get(
@@ -106,13 +129,34 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         show_saturated=config_data.get("visualization", {}).get("show_saturated", True),
     )
 
+    # Create ruler detection config
+    ruler_detection_config = RulerDetectionConfig(
+        enabled=config_data.get("ruler_detection", {}).get("enabled", True),
+        min_line_length=config_data.get("ruler_detection", {}).get("min_line_length", 50),
+        max_line_gap=config_data.get("ruler_detection", {}).get("max_line_gap", 10),
+        expected_tick_distance_mm=config_data.get("ruler_detection", {}).get("expected_tick_distance_mm", 1.0),
+        canny_threshold1=config_data.get("ruler_detection", {}).get("canny_threshold1", 50),
+        canny_threshold2=config_data.get("ruler_detection", {}).get("canny_threshold2", 150),
+        hough_threshold=config_data.get("ruler_detection", {}).get("hough_threshold", 20),
+    )
+
+    # Create export config
+    export_config = ExportConfig(
+        csv_delimiter=config_data.get("export", {}).get("csv_delimiter", ","),
+        export_formats=config_data.get("export", {}).get("export_formats", ["csv", "json", "txt"]),
+        compress_outputs=config_data.get("export", {}).get("compress_outputs", False),
+        include_metadata=config_data.get("export", {}).get("include_metadata", True),
+    )
+
     # Create main config
     config = Config(
         processing=processing_config,
-        circle_detection=circle_detection_config,
+        shape_detection=shape_detection_config,
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
+        ruler_detection=ruler_detection_config,
+        export=export_config, # Added export_config
         output_dir=Path(config_data.get("output_dir", "./output")),
         log_level=getattr(logging, config_data.get("log_level", "INFO")),
     )
@@ -132,8 +176,9 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
     """
     # Create components
     image_processor = ImageProcessor(config.processing)
-    circle_detector = CircleDetector(config.circle_detection)
+    shape_detector = ShapeDetector() # TODO: Update ShapeDetector to accept config
     thickness_estimator = ThicknessEstimator(config.thickness)
+    ruler_detector = RulerDetector(config.ruler_detection) # Modified
 
     # Create uniformity metrics
     uniformity_metrics = [
@@ -144,14 +189,15 @@ def setup_dependencies(config: Config) -> NanoFiberAnalyzer:
 
     # Create visualizer and data exporter
     visualizer = Visualizer(config.visualization)
-    data_exporter = DataExporter()
+    data_exporter = DataExporter(config.export) # Pass export config
 
     # Create main analyzer
     analyzer = NanoFiberAnalyzer(
         config=config,
         image_processor=image_processor,
-        circle_detector=circle_detector,
+        shape_detector=shape_detector,  # Changed from circle_detector
         thickness_estimator=thickness_estimator,
+        ruler_detector=ruler_detector,
         uniformity_metrics=uniformity_metrics,
         visualizer=visualizer,
         data_exporter=data_exporter,
@@ -176,17 +222,18 @@ def generate_default_config(output_path: Path) -> None:
             "blur_kernel_size": config.processing.blur_kernel_size,
             "contrast_alpha": config.processing.contrast_alpha,
             "contrast_beta": config.processing.contrast_beta,
-            "grayscale_conversion": config.processing.grayscale_conversion,
+            "grayscale_conversion": "weighted",  # Convert enum to string
         },
-        "circle_detection": {
-            "min_radius": config.circle_detection.min_radius,
-            "max_radius": config.circle_detection.max_radius,
-            "detection_method": config.circle_detection.detection_method,
-            "param1": config.circle_detection.param1,
-            "param2": config.circle_detection.param2,
+        "shape_detection": {
+            "min_area": config.shape_detection.min_area,
+            "max_area": config.shape_detection.max_area,
+            "detection_method": config.shape_detection.detection_method,
+            "approx_epsilon_ratio": config.shape_detection.approx_epsilon_ratio,
+            "min_vertices": config.shape_detection.min_vertices,
+            "max_vertices": config.shape_detection.max_vertices,
         },
         "thickness": {
-            "model_type": config.thickness.model_type,
+            "model_type": "linear",  # Convert enum to string
             "a": config.thickness.a,
             "b": config.thickness.b,
             "saturation_threshold": config.thickness.saturation_threshold,
@@ -201,6 +248,21 @@ def generate_default_config(output_path: Path) -> None:
             "dpi": config.visualization.dpi,
             "figure_size": config.visualization.figure_size,
             "show_saturated": config.visualization.show_saturated,
+        },
+        "ruler_detection": {
+            "enabled": config.ruler_detection.enabled,
+            "min_line_length": config.ruler_detection.min_line_length,
+            "max_line_gap": config.ruler_detection.max_line_gap,
+            "expected_tick_distance_mm": config.ruler_detection.expected_tick_distance_mm,
+            "canny_threshold1": config.ruler_detection.canny_threshold1,
+            "canny_threshold2": config.ruler_detection.canny_threshold2,
+            "hough_threshold": config.ruler_detection.hough_threshold,
+        },
+        "export": {
+            "csv_delimiter": config.export.csv_delimiter,
+            "export_formats": config.export.export_formats,
+            "compress_outputs": config.export.compress_outputs,
+            "include_metadata": config.export.include_metadata,
         },
         "output_dir": str(config.output_dir),
         "log_level": logging.getLevelName(config.log_level),
@@ -220,7 +282,7 @@ def main():
 
     # Define arguments
     parser.add_argument(
-        "--input", "-i", type=str, required=True, help="Input image file or directory"
+        "--input", "-i", type=str, help="Input image file or directory"
     )
     parser.add_argument(
         "--output",
@@ -254,6 +316,10 @@ def main():
         generate_default_config(Path(args.generate_config))
         print(f"Default configuration generated at {args.generate_config}")
         return 0
+
+    # Validate that input is provided when not generating config
+    if not args.input:
+        parser.error("--input/-i is required when not using --generate-config")
 
     # Load configuration
     config_data = {}

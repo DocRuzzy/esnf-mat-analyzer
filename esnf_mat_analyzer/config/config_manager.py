@@ -16,14 +16,13 @@ import argparse
 from esnf_mat_analyzer.core.data_types import (
     Config,
     ProcessingConfig,
-    CircleDetectionConfig,
     ThicknessConfig,
     UniformityConfig,
     VisualizationConfig,
     ExportConfig,
     GrayscaleConversionMethod,
-    CircleDetectionMethod,
     ThicknessModelType,
+    BackgroundCorrectionMethod,
 )
 
 # Setup logging
@@ -36,15 +35,19 @@ GRAYSCALE_METHOD_MAP = {
     "luminance": GrayscaleConversionMethod.LUMINANCE,
 }
 
-CIRCLE_DETECTION_METHOD_MAP = {
-    "hough": CircleDetectionMethod.HOUGH,
-    "contour": CircleDetectionMethod.CONTOUR,
-}
-
 THICKNESS_MODEL_MAP = {
     "linear": ThicknessModelType.LINEAR,
     "logarithmic": ThicknessModelType.LOGARITHMIC,
     "exponential": ThicknessModelType.EXPONENTIAL,
+    "beer_lambert": ThicknessModelType.BEER_LAMBERT,
+}
+
+BACKGROUND_CORRECTION_METHOD_MAP = {
+    "none": BackgroundCorrectionMethod.NONE,
+    "basic": BackgroundCorrectionMethod.BASIC,
+    "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
+    "restore": BackgroundCorrectionMethod.RESTORE,
+    "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC,
 }
 
 
@@ -64,16 +67,20 @@ def enum_to_str(enum_value: Any) -> str:
             GrayscaleConversionMethod.AVERAGE: "average",
             GrayscaleConversionMethod.LUMINANCE: "luminance",
         }[enum_value]
-    elif isinstance(enum_value, CircleDetectionMethod):
-        return {
-            CircleDetectionMethod.HOUGH: "hough",
-            CircleDetectionMethod.CONTOUR: "contour",
-        }[enum_value]
     elif isinstance(enum_value, ThicknessModelType):
         return {
             ThicknessModelType.LINEAR: "linear",
             ThicknessModelType.LOGARITHMIC: "logarithmic",
             ThicknessModelType.EXPONENTIAL: "exponential",
+            ThicknessModelType.BEER_LAMBERT: "beer_lambert",
+        }[enum_value]
+    elif isinstance(enum_value, BackgroundCorrectionMethod):
+        return {
+            BackgroundCorrectionMethod.NONE: "none",
+            BackgroundCorrectionMethod.BASIC: "basic",
+            BackgroundCorrectionMethod.ROLLING_BALL: "rolling_ball",
+            BackgroundCorrectionMethod.RESTORE: "restore",
+            BackgroundCorrectionMethod.HOMOMORPHIC: "homomorphic",
         }[enum_value]
     else:
         return str(enum_value)
@@ -101,14 +108,6 @@ def str_to_enum(string_value: str, enum_type: Any) -> Any:
                 f"Valid values are: {valid_values}"
             )
         return GRAYSCALE_METHOD_MAP[string_value.lower()]
-    elif enum_type == CircleDetectionMethod:
-        if string_value.lower() not in CIRCLE_DETECTION_METHOD_MAP:
-            valid_values = ", ".join(CIRCLE_DETECTION_METHOD_MAP.keys())
-            raise ValueError(
-                f"Invalid circle detection method: {string_value}. "
-                f"Valid values are: {valid_values}"
-            )
-        return CIRCLE_DETECTION_METHOD_MAP[string_value.lower()]
     elif enum_type == ThicknessModelType:
         if string_value.lower() not in THICKNESS_MODEL_MAP:
             valid_values = ", ".join(THICKNESS_MODEL_MAP.keys())
@@ -117,6 +116,14 @@ def str_to_enum(string_value: str, enum_type: Any) -> Any:
                 f"Valid values are: {valid_values}"
             )
         return THICKNESS_MODEL_MAP[string_value.lower()]
+    elif enum_type == BackgroundCorrectionMethod:
+        if string_value.lower() not in BACKGROUND_CORRECTION_METHOD_MAP:
+            valid_values = ", ".join(BACKGROUND_CORRECTION_METHOD_MAP.keys())
+            raise ValueError(
+                f"Invalid background correction method: {string_value}. "
+                f"Valid values are: {valid_values}"
+            )
+        return BACKGROUND_CORRECTION_METHOD_MAP[string_value.lower()]
     else:
         raise TypeError(f"Unsupported enum type: {enum_type}")
 
@@ -137,16 +144,14 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
         "contrast_alpha": config.processing.contrast_alpha,
         "contrast_beta": config.processing.contrast_beta,
         "grayscale_conversion": enum_to_str(config.processing.grayscale_conversion),
-    }
-
-    circle_detection_dict = {
-        "min_radius": config.circle_detection.min_radius,
-        "max_radius": config.circle_detection.max_radius,
-        "detection_method": enum_to_str(config.circle_detection.detection_method),
-        "param1": config.circle_detection.param1,
-        "param2": config.circle_detection.param2,
-        "min_area": config.circle_detection.min_area,
-        "max_area": config.circle_detection.max_area,
+        "background_correction_method": enum_to_str(config.processing.background_correction_method),
+        "basic_correction_n_components": config.processing.basic_correction_n_components,
+        "rolling_ball_radius": config.processing.rolling_ball_radius,
+        "restore_percentile": config.processing.restore_percentile,
+        "homomorphic_cutoff": config.processing.homomorphic_cutoff,
+        "homomorphic_g_low": config.processing.homomorphic_g_low,
+        "homomorphic_g_high": config.processing.homomorphic_g_high,
+        "saturation_recovery": config.processing.saturation_recovery,
     }
 
     thickness_dict = {
@@ -156,6 +161,7 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
         "saturation_threshold": config.thickness.saturation_threshold,
         "normalization": config.thickness.normalization,
         "calibration_factor": config.thickness.calibration_factor,
+        "attenuation_coefficient": config.thickness.attenuation_coefficient,
     }
 
     uniformity_dict = {
@@ -165,6 +171,10 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
         "min_thickness_percentile": config.uniformity.min_thickness_percentile,
         "max_thickness_percentile": config.uniformity.max_thickness_percentile,
         "ignore_saturated": config.uniformity.ignore_saturated,
+        "glcm_distances": config.uniformity.glcm_distances,
+        "glcm_angles": config.uniformity.glcm_angles,
+        "lbp_radius": config.uniformity.lbp_radius,
+        "lbp_points": config.uniformity.lbp_points,
     }
 
     visualization_dict = {
@@ -188,7 +198,6 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
     # Combine into main config dictionary
     config_dict = {
         "processing": processing_dict,
-        "circle_detection": circle_detection_dict,
         "thickness": thickness_dict,
         "uniformity": uniformity_dict,
         "visualization": visualization_dict,
@@ -216,7 +225,6 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
     """
     # Create individual config components with default values
     processing_config = ProcessingConfig()
-    circle_detection_config = CircleDetectionConfig()
     thickness_config = ThicknessConfig()
     uniformity_config = UniformityConfig()
     visualization_config = VisualizationConfig()
@@ -235,25 +243,24 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
             processing_config.grayscale_conversion = str_to_enum(
                 proc_dict["grayscale_conversion"], GrayscaleConversionMethod
             )
-
-    if "circle_detection" in config_dict:
-        circ_dict = config_dict["circle_detection"]
-        if "min_radius" in circ_dict:
-            circle_detection_config.min_radius = int(circ_dict["min_radius"])
-        if "max_radius" in circ_dict:
-            circle_detection_config.max_radius = int(circ_dict["max_radius"])
-        if "detection_method" in circ_dict:
-            circle_detection_config.detection_method = str_to_enum(
-                circ_dict["detection_method"], CircleDetectionMethod
+        if "background_correction_method" in proc_dict:
+            processing_config.background_correction_method = str_to_enum(
+                proc_dict["background_correction_method"], BackgroundCorrectionMethod
             )
-        if "param1" in circ_dict:
-            circle_detection_config.param1 = int(circ_dict["param1"])
-        if "param2" in circ_dict:
-            circle_detection_config.param2 = int(circ_dict["param2"])
-        if "min_area" in circ_dict:
-            circle_detection_config.min_area = int(circ_dict["min_area"])
-        if "max_area" in circ_dict:
-            circle_detection_config.max_area = int(circ_dict["max_area"])
+        if "basic_correction_n_components" in proc_dict:
+            processing_config.basic_correction_n_components = int(proc_dict["basic_correction_n_components"])
+        if "rolling_ball_radius" in proc_dict:
+            processing_config.rolling_ball_radius = int(proc_dict["rolling_ball_radius"])
+        if "restore_percentile" in proc_dict:
+            processing_config.restore_percentile = float(proc_dict["restore_percentile"])
+        if "homomorphic_cutoff" in proc_dict:
+            processing_config.homomorphic_cutoff = float(proc_dict["homomorphic_cutoff"])
+        if "homomorphic_g_low" in proc_dict:
+            processing_config.homomorphic_g_low = float(proc_dict["homomorphic_g_low"])
+        if "homomorphic_g_high" in proc_dict:
+            processing_config.homomorphic_g_high = float(proc_dict["homomorphic_g_high"])
+        if "saturation_recovery" in proc_dict:
+            processing_config.saturation_recovery = bool(proc_dict["saturation_recovery"])
 
     if "thickness" in config_dict:
         thick_dict = config_dict["thickness"]
@@ -278,6 +285,8 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
             thickness_config.calibration_factor = float(
                 thick_dict["calibration_factor"]
             )
+        if "attenuation_coefficient" in thick_dict:
+            thickness_config.attenuation_coefficient = float(thick_dict["attenuation_coefficient"])
 
     if "uniformity" in config_dict:
         unif_dict = config_dict["uniformity"]
@@ -297,6 +306,14 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
             )
         if "ignore_saturated" in unif_dict:
             uniformity_config.ignore_saturated = bool(unif_dict["ignore_saturated"])
+        if "glcm_distances" in unif_dict:
+            uniformity_config.glcm_distances = list(unif_dict["glcm_distances"])
+        if "glcm_angles" in unif_dict:
+            uniformity_config.glcm_angles = list(unif_dict["glcm_angles"])
+        if "lbp_radius" in unif_dict:
+            uniformity_config.lbp_radius = int(unif_dict["lbp_radius"])
+        if "lbp_points" in unif_dict:
+            uniformity_config.lbp_points = int(unif_dict["lbp_points"])
 
     if "visualization" in config_dict:
         vis_dict = config_dict["visualization"]
@@ -359,7 +376,6 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
     # Create main Config object
     config = Config(
         processing=processing_config,
-        circle_detection=circle_detection_config,
         thickness=thickness_config,
         uniformity=uniformity_config,
         visualization=visualization_config,
@@ -468,25 +484,6 @@ def validate_config(config: Config) -> List[str]:
     if config.processing.contrast_beta < -255 or config.processing.contrast_beta > 255:
         errors.append("contrast_beta must be between -255 and 255")
 
-    # Validate CircleDetectionConfig
-    if config.circle_detection.min_radius <= 0:
-        errors.append("min_radius must be positive")
-
-    if config.circle_detection.max_radius <= config.circle_detection.min_radius:
-        errors.append("max_radius must be greater than min_radius")
-
-    if config.circle_detection.param1 <= 0:
-        errors.append("param1 must be positive")
-
-    if config.circle_detection.param2 <= 0:
-        errors.append("param2 must be positive")
-
-    if config.circle_detection.min_area <= 0:
-        errors.append("min_area must be positive")
-
-    if config.circle_detection.max_area <= config.circle_detection.min_area:
-        errors.append("max_area must be greater than min_area")
-
     # Validate ThicknessConfig
     if (
         config.thickness.saturation_threshold <= 0
@@ -533,6 +530,28 @@ def validate_config(config: Config) -> List[str]:
         or config.visualization.figure_size[1] <= 0
     ):
         errors.append("figure_size dimensions must be positive")
+
+    # Validate new ProcessingConfig fields
+    if config.processing.basic_correction_n_components < 1:
+        errors.append("basic_correction_n_components must be positive")
+    if config.processing.rolling_ball_radius < 1:
+        errors.append("rolling_ball_radius must be positive")
+    if not (0 < config.processing.restore_percentile < 100):
+        errors.append("restore_percentile must be between 0 and 100")
+    if config.processing.homomorphic_cutoff <= 0:
+        errors.append("homomorphic_cutoff must be positive")
+
+    # Validate new ThicknessConfig fields
+    if config.thickness.attenuation_coefficient <= 0:
+        errors.append("attenuation_coefficient must be positive")
+
+    # Validate new UniformityConfig fields
+    if not all(d > 0 for d in config.uniformity.glcm_distances):
+        errors.append("All glcm_distances must be positive")
+    if config.uniformity.lbp_radius < 1:
+        errors.append("lbp_radius must be positive")
+    if config.uniformity.lbp_points < 1:
+        errors.append("lbp_points must be positive")
 
     return errors
 

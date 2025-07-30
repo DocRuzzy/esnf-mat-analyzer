@@ -10,6 +10,12 @@ processing:
   contrast_beta: 0
   # Method for RGB to grayscale conversion ('weighted', 'average', 'luminance')
   grayscale_conversion: weighted
+  # Background leveling configuration
+  leveling:
+    # Enable or disable background leveling
+    enabled: true
+    # Kernel size for morphological operations
+    kernel_size: 25
 
 # Circle detection configuration
 circle_detection:
@@ -53,6 +59,10 @@ visualization:
   figure_size: [10, 8]
   # Whether to highlight saturated regions in visualizations
   show_saturated: true
+  # Percentile range for automatic heatmap color scaling (min, max)
+  heatmap_percentile_range: [2.0, 98.0]
+  # Whether to automatically adjust heatmap color range based on data
+  auto_range_heatmap: true
 
 # Output directory for analysis results
 output_dir: ./output

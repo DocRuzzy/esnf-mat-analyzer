@@ -4,8 +4,7 @@ import logging
 from typing import Optional
 
 from esnf_mat_analyzer.core.interfaces import ThicknessEstimatorInterface
-from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType
-from esnf_mat_analyzer.processing.physics_based_thickness import BeerLambertEstimator
+from esnf_mat_analyzer.core.data_types import ThicknessConfig, ThicknessModelType, Mask, ThicknessMap, Image
 
 class ThicknessEstimator(ThicknessEstimatorInterface):
     """
@@ -22,17 +21,8 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ThicknessEstimator initialized with config: {self.config}")
-        
-        # Initialize Beer-Lambert estimator if needed
-        if config.model_type == ThicknessModelType.BEER_LAMBERT:
-            self.beer_lambert = BeerLambertEstimator(
-                attenuation_coefficient=config.attenuation_coefficient,
-                reference_intensity=config.reference_intensity,
-                min_transmittance=config.min_transmittance,
-                max_thickness_um=config.thickness_range_um[1]
-            )
 
-    def estimate(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def estimate(self, image: Image, mask: Mask) -> ThicknessMap:
         """
         Estimate thickness from image brightness.
 
@@ -52,16 +42,8 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         # Apply the chosen thickness model
         # Ensure calculations are done in float to maintain precision
         image_float = image.astype(np.float32)
-
-        if self.config.model_type == ThicknessModelType.BEER_LAMBERT:
-            # Use Beer-Lambert law for physics-based thickness estimation
-            self.logger.info("Using Beer-Lambert law for thickness estimation")
-            thickness_map = self.beer_lambert.estimate_thickness(
-                image,
-                background_corrected=True,
-                spatial_scale_um_per_pixel=self.config.spatial_scale_um_per_pixel
-            )
-        elif self.config.model_type == ThicknessModelType.LINEAR:
+        
+        if self.config.model_type == ThicknessModelType.LINEAR:
             # thickness = a * brightness + b
             thickness_map = self.config.a * image_float + self.config.b
         elif self.config.model_type == ThicknessModelType.LOGARITHMIC:
@@ -85,7 +67,7 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
             thickness_map *= self.config.calibration_factor
         else:
             self.logger.info("No calibration factor applied or factor is invalid.")
-
+            
         # Normalization (optional, based on config)
         if self.config.normalization:
             self.logger.info("Normalizing thickness map to [0, 1] range.")
@@ -100,11 +82,11 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
 
         # Ensure non-negative thickness
         thickness_map[thickness_map < 0] = 0.0
-
+        
         self.logger.debug("Thickness estimation complete.")
         return thickness_map.astype(np.float32) # Ensure float output
 
-    def get_saturation_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def get_saturation_mask(self, image: Image, mask: Mask) -> Mask:
         """
         Create a mask of saturated pixels.
         Pixels are considered saturated if their brightness value is at or above
@@ -123,13 +105,13 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
             raise ValueError("Input image for saturation mask must be grayscale.")
 
         saturation_mask_full = (image >= self.config.saturation_threshold).astype(np.uint8)
-
+        
         # Only consider saturation within the provided ROI mask
         saturation_mask_roi = saturation_mask_full * mask
-
+        
         num_saturated_pixels = np.sum(saturation_mask_roi)
         self.logger.info(f"Found {num_saturated_pixels} saturated pixels within the ROI.")
-
+        
         return saturation_mask_roi
 
 if __name__ == '__main__':
@@ -139,9 +121,9 @@ if __name__ == '__main__':
 
     # Dummy config
     config = ThicknessConfig(
-        model_type=ThicknessModelType.LINEAR,
-        a=1.0,
-        b=0.0,
+        model_type=ThicknessModelType.LINEAR, 
+        a=1.0, 
+        b=0.0, 
         saturation_threshold=250,
         calibration_factor=10.0 # e.g., 10 nm per unit brightness
     )
@@ -151,7 +133,7 @@ if __name__ == '__main__':
     dummy_height, dummy_width = 100, 100
     dummy_image = np.random.randint(0, 256, (dummy_height, dummy_width), dtype=np.uint8)
     dummy_image[10:20, 10:20] = 255 # Saturated region
-
+    
     dummy_mask = np.zeros((dummy_height, dummy_width), dtype=np.uint8)
     cv2.circle(dummy_mask, (dummy_width//2, dummy_height//2), dummy_height//3, 1, -1)
 

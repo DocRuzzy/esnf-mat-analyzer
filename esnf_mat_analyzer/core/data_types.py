@@ -22,12 +22,13 @@ class GrayscaleConversionMethod(Enum):
     LUMINANCE = auto()  # Perceptual luminance-preserving conversion
 
 
-class CircleDetectionMethod(Enum):
-    """Methods for detecting circular regions in images."""
-
-    HOUGH = auto()  # Hough Circle Transform
-    CONTOUR = auto()  # Contour-based detection
-
+class BackgroundCorrectionMethod(Enum):
+    """Methods for background correction."""
+    NONE = auto()
+    BASIC = auto()
+    ROLLING_BALL = auto()
+    RESTORE = auto()
+    HOMOMORPHIC = auto()
 
 class ThicknessModelType(Enum):
     """Models for converting brightness to thickness."""
@@ -35,11 +36,29 @@ class ThicknessModelType(Enum):
     LINEAR = auto()  # Linear model: thickness = a * brightness + b
     LOGARITHMIC = auto()  # Log model: thickness = a * log(1 + brightness) + b
     EXPONENTIAL = auto()  # Exp model: thickness = a * (exp(brightness / 255) - 1) + b
+    BEER_LAMBERT = auto()
+
+
+@dataclass
+class LevelingConfig:
+    """Configuration for background leveling."""
+
+    enabled: bool = True
+    """Enable or disable background leveling."""
+
+    kernel_size: int = 25
+    """Size of the kernel for morphological operations."""
 
 
 @dataclass
 class ProcessingConfig:
     """Configuration parameters for image preprocessing."""
+
+    leveling: LevelingConfig = field(default_factory=LevelingConfig)
+    """Background leveling configuration."""
+
+    background_correction_method: BackgroundCorrectionMethod = BackgroundCorrectionMethod.NONE
+    """Method for background correction."""
 
     blur_kernel_size: int = 5
     """Size of Gaussian blur kernel. Should be odd. Set to 0 to disable blurring."""
@@ -53,39 +72,56 @@ class ProcessingConfig:
     grayscale_conversion: GrayscaleConversionMethod = GrayscaleConversionMethod.WEIGHTED
     """Method used for converting RGB images to grayscale."""
 
+    basic_correction_n_components: int = 1
+    """Number of components for BaSiC correction."""
+
+    rolling_ball_radius: int = 50
+    """Radius for rolling ball background correction."""
+
+    restore_percentile: float = 5.0
+    """Percentile for RESTORE background correction."""
+
+    homomorphic_cutoff: float = 30
+    """Cutoff frequency for homomorphic filter."""
+
+    homomorphic_g_low: float = 0.5
+    """Low gain for homomorphic filter."""
+
+    homomorphic_g_high: float = 2.0
+    """High gain for homomorphic filter."""
+
+    saturation_recovery: bool = False
+    """Enable or disable saturation recovery."""
+
 
 @dataclass
-class CircleDetectionConfig:
-    """Configuration parameters for circle detection."""
+class ShapeDetectionConfig:
+    """Configuration for shape detection."""
 
-    min_radius: int = 50
-    """Minimum radius in pixels to be detected."""
+    min_area: int = 100
+    """Minimum area for shape detection."""
 
-    max_radius: int = 500
-    """Maximum radius in pixels to be detected."""
+    max_area: int = 50000
+    """Maximum area for shape detection."""
 
-    detection_method: CircleDetectionMethod = CircleDetectionMethod.HOUGH
-    """Method used for detecting circles."""
+    detection_method: str = "contour"
+    """Shape detection method: 'contour', 'hough', or 'adaptive'."""
 
-    param1: int = 50
-    """Parameter 1 for Hough Transform (higher value for fewer false detections)."""
+    approx_epsilon_ratio: float = 0.02
+    """Epsilon ratio for contour approximation."""
 
-    param2: int = 30
-    """Parameter 2 for Hough Transform (lower value detects more circles)."""
+    min_vertices: int = 3
+    """Minimum number of vertices for polygon detection."""
 
-    # Additional parameters for contour-based detection
-    min_area: int = 1000
-    """Minimum area in pixels² for contour-based detection."""
-
-    max_area: int = 1000000
-    """Maximum area in pixels² for contour-based detection."""
+    max_vertices: int = 20
+    """Maximum number of vertices for polygon detection."""
 
 
 @dataclass
 class ThicknessConfig:
     """Configuration parameters for thickness estimation."""
 
-    model_type: ThicknessModelType = ThicknessModelType.LINEAR
+    model_type: ThicknessModelType = ThicknessModelType.BEER_LAMBERT
     """Model for converting brightness to thickness."""
 
     a: float = 1.0
@@ -94,14 +130,30 @@ class ThicknessConfig:
     b: float = 0.0
     """Offset for thickness model."""
 
-    saturation_threshold: int = 250
-    """Pixel value threshold for saturation (0-255)."""
+    saturation_threshold: int = 240
+    """Pixel value threshold for saturation (0-255). Values at or above this are considered saturated."""
 
     normalization: bool = False
     """Whether to normalize thickness values to [0, 1] range."""
 
     calibration_factor: Optional[float] = None
     """Optional calibration factor for converting to absolute units (e.g., nm)."""
+
+    # Beer-Lambert specific parameters
+    attenuation_coefficient: float = 0.04778
+    """Attenuation coefficient for Beer-Lambert law (literature-validated value)."""
+    
+    reference_intensity: Optional[float] = None
+    """Background intensity (I₀). If None, auto-detected from image."""
+    
+    min_transmittance: float = 0.01
+    """Minimum transmittance to prevent log(0) errors."""
+    
+    thickness_range_um: Tuple[float, float] = (0.0, 1000.0)
+    """Valid thickness range in micrometers."""
+    
+    spatial_scale_um_per_pixel: Optional[float] = None
+    """Spatial scale for absolute thickness measurements."""
 
 
 @dataclass
@@ -126,6 +178,18 @@ class UniformityConfig:
     ignore_saturated: bool = True
     """Whether to exclude saturated pixels from uniformity calculations."""
 
+    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
+    """Distances for GLCM calculation."""
+
+    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
+    """Angles for GLCM calculation."""
+
+    lbp_radius: int = 1
+    """Radius for LBP calculation."""
+
+    lbp_points: int = 8
+    """Number of points for LBP calculation."""
+
 
 @dataclass
 class VisualizationConfig:
@@ -143,6 +207,12 @@ class VisualizationConfig:
     show_saturated: bool = True
     """Whether to highlight saturated regions in visualizations."""
 
+    heatmap_percentile_range: Tuple[float, float] = (2.0, 98.0)
+    """Percentile range for heatmap color scaling (min_percentile, max_percentile)."""
+
+    auto_range_heatmap: bool = True
+    """Whether to automatically adjust heatmap color range based on data percentiles."""
+
     radial_avg_line_color: str = "blue"
     """Color for the average line in radial profiles."""
 
@@ -154,6 +224,32 @@ class VisualizationConfig:
 
     histogram_edge_color: str = "black"
     """Color for histogram bar edges."""
+
+
+@dataclass
+class RulerDetectionConfig:
+    """Configuration parameters for ruler detection and scale calibration."""
+
+    enabled: bool = True
+    """Enable or disable ruler detection."""
+
+    min_line_length: int = 50
+    """Minimum length of lines to be considered part of a ruler (in pixels)."""
+
+    max_line_gap: int = 10
+    """Maximum allowed gap between line segments to treat them as a single line."""
+
+    expected_tick_distance_mm: float = 1.0
+    """The expected real-world distance between major ticks being searched for (e.g., 1mm, 5mm, 10mm)."""
+
+    canny_threshold1: int = 50
+    """First threshold for the Canny edge detector."""
+
+    canny_threshold2: int = 150
+    """Second threshold for the Canny edge detector."""
+
+    hough_threshold: int = 20
+    """Accumulator threshold parameter for Hough Line Transform."""
 
 
 @dataclass
@@ -180,10 +276,8 @@ class Config:
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     """Image processing configuration."""
 
-    circle_detection: CircleDetectionConfig = field(
-        default_factory=CircleDetectionConfig
-    )
-    """Circle detection configuration."""
+    shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
+    """Shape detection configuration."""
 
     thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
     """Thickness estimation configuration."""
@@ -193,6 +287,9 @@ class Config:
 
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     """Visualization configuration."""
+
+    ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
+    """Ruler detection configuration."""
 
     export: ExportConfig = field(default_factory=ExportConfig)
     """Export configuration."""
@@ -249,11 +346,8 @@ class AnalysisResult:
     image_path: Path
     """Path to the original image."""
 
-    center: Tuple[int, int]
-    """Detected center coordinates (x, y)."""
-
-    radius: int
-    """Detected radius."""
+    contour: np.ndarray
+    """Detected contour of the mat."""
 
     thickness_map: np.ndarray
     """Estimated thickness map."""
@@ -270,6 +364,8 @@ class AnalysisResult:
     radial_profile: Optional[RadialProfile] = None
     """Radial profile data if calculated."""
 
+    spatial_scale_pixels_per_mm: Optional[float] = None # <<< NEW FIELD
+
     results_dir: Optional[Path] = None
     """Directory containing result files."""
 
@@ -281,5 +377,7 @@ class AnalysisResult:
 
     def __post_init__(self):
         """Validate the analysis result."""
-        if self.thickness_map.shape != self.mask.shape:
+        if hasattr(self, 'thickness_map') and hasattr(self, 'mask') and \
+               self.thickness_map.shape != self.mask.shape:
+                # Check existence of attributes because of potential partial mock objects in tests
             raise ValueError("Thickness map and mask must have the same shape")

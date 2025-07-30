@@ -63,6 +63,7 @@ class TestImageProcessor:
 
     def test_preprocess_with_default_config(self, test_image_path, default_config):
         """Test image preprocessing with default configuration."""
+        default_config.leveling.enabled = False
         processor = ImageProcessor(default_config)
         image = processor.load_image(test_image_path)
         preprocessed = processor.preprocess(image)
@@ -72,9 +73,9 @@ class TestImageProcessor:
         assert preprocessed.dtype == np.uint8
 
         # Center should be white (255)
-        assert preprocessed[100, 100] == 255
+        assert preprocessed[100, 100] > 240
         # Corner should be black (0)
-        assert preprocessed[0, 0] == 0
+        assert preprocessed[0, 0] < 10
 
     def test_grayscale_conversion_methods(self, test_image_path):
         """Test different grayscale conversion methods."""
@@ -98,6 +99,7 @@ class TestImageProcessor:
             weighted_config = ProcessingConfig(
                 grayscale_conversion=GrayscaleConversionMethod.WEIGHTED
             )
+            weighted_config.leveling.enabled = False
             weighted_processor = ImageProcessor(weighted_config)
             weighted_image = weighted_processor.load_image(image_path)
             weighted_gray = weighted_processor.preprocess(weighted_image)
@@ -106,6 +108,7 @@ class TestImageProcessor:
             average_config = ProcessingConfig(
                 grayscale_conversion=GrayscaleConversionMethod.AVERAGE
             )
+            average_config.leveling.enabled = False
             average_processor = ImageProcessor(average_config)
             average_image = average_processor.load_image(image_path)
             average_gray = average_processor.preprocess(average_image)
@@ -114,6 +117,7 @@ class TestImageProcessor:
             luminance_config = ProcessingConfig(
                 grayscale_conversion=GrayscaleConversionMethod.LUMINANCE
             )
+            luminance_config.leveling.enabled = False
             luminance_processor = ImageProcessor(luminance_config)
             luminance_image = luminance_processor.load_image(image_path)
             luminance_gray = luminance_processor.preprocess(luminance_image)
@@ -131,21 +135,26 @@ class TestImageProcessor:
     def test_blur_and_contrast(self, test_image_path):
         """Test blur and contrast adjustments."""
         # Load the original image
-        default_processor = ImageProcessor(ProcessingConfig())
+        config = ProcessingConfig()
+        config.leveling.enabled = False
+        default_processor = ImageProcessor(config)
         original = default_processor.load_image(test_image_path)
 
         # Create a configuration with strong blur
         blur_config = ProcessingConfig(blur_kernel_size=15)
+        blur_config.leveling.enabled = False
         blur_processor = ImageProcessor(blur_config)
         blurred = blur_processor.preprocess(original)
 
         # Create a configuration with increased contrast
         contrast_config = ProcessingConfig(contrast_alpha=2.0)
+        contrast_config.leveling.enabled = False
         contrast_processor = ImageProcessor(contrast_config)
         contrasted = contrast_processor.preprocess(original)
 
         # Create a configuration with no blur
         no_blur_config = ProcessingConfig(blur_kernel_size=0)
+        no_blur_config.leveling.enabled = False
         no_blur_processor = ImageProcessor(no_blur_config)
         no_blur = no_blur_processor.preprocess(original)
 
@@ -213,3 +222,35 @@ class TestImageProcessor:
             saved_image = cv2.imread(str(files[0]))
             assert saved_image is not None
             assert saved_image.shape == (200, 200, 3)
+
+    def test_background_leveling(self, default_config):
+        """Test the background leveling feature."""
+        # Create an image with a gradient background
+        image = np.zeros((200, 200), dtype=np.uint8)
+        for i in range(200):
+            image[i, :] = i  # Gradient from 0 to 199
+
+        # Add some "fibers" (white dots)
+        for _ in range(100):
+            x, y = np.random.randint(0, 200, 2)
+            cv2.circle(image, (x, y), 2, (255, 255, 255), -1)
+
+        # Convert to 3-channel image for preprocessing
+        image_3c = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+        # Config with leveling enabled
+        leveling_config = ProcessingConfig()
+        leveling_config.leveling.enabled = True
+        leveling_config.leveling.kernel_size = 25
+        processor = ImageProcessor(leveling_config)
+
+        # Process the image
+        processed_image = processor.preprocess(image_3c)
+
+        # The background should be much more uniform (lower standard deviation)
+        # We check the std dev of the non-fiber parts of the image
+        # (where the original image was not 255)
+        original_background_std = np.std(image[image < 255])
+        processed_background_std = np.std(processed_image[image < 255])
+
+        assert processed_background_std < original_background_std

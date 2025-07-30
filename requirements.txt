@@ -1,0 +1,7 @@
+Pillow
+numpy
+opencv-python
+matplotlib
+pandas
+pyyaml
+piexif

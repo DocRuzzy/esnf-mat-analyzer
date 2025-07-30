@@ -10,8 +10,9 @@ import csv
 from pathlib import Path
 from typing import Dict, Tuple, List
 import logging
+import piexif
 
-from nanofiber_analyzer.core.interfaces import DataExporterInterface
+from esnf_mat_analyzer.core.interfaces import DataExporterInterface
 
 
 class DataExporter(DataExporterInterface):
@@ -19,9 +20,14 @@ class DataExporter(DataExporterInterface):
     Component for exporting nanofiber analysis data to various file formats.
     """
     
-    def __init__(self):
-        """Initialize the data exporter."""
+    def __init__(self, config=None):
+        """Initialize the data exporter.
+        
+        Args:
+            config: Export configuration (optional)
+        """
         self.logger = logging.getLogger(__name__)
+        self.config = config
     
     def export_thickness_map(self, thickness_map: np.ndarray, path: Path) -> None:
         """
@@ -156,3 +162,29 @@ class DataExporter(DataExporterInterface):
             for i in range(max_length):
                 row = [i] + list(data[i, :])
                 writer.writerow(row)
+
+    def write_scale_to_metadata(self, image_path: Path, scale: float) -> None:
+        """
+        Write the scale to the image's EXIF metadata.
+
+        Args:
+            image_path: Path to the image file.
+            scale: The scale in pixels per millimeter.
+        """
+        try:
+            exif_dict = piexif.load(str(image_path))
+        except Exception:
+            exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+
+        user_comment = f"pixels_per_mm:{scale}"
+        # Encode UserComment manually since piexif.helper was removed in newer versions
+        # UserComment format: 8 bytes for character code + text data
+        encoded_comment = b"UNICODE\x00" + user_comment.encode("utf-8")
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = encoded_comment
+
+        try:
+            exif_bytes = piexif.dump(exif_dict)
+            piexif.insert(exif_bytes, str(image_path))
+            self.logger.info(f"Successfully wrote scale to {image_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to write EXIF data to {image_path}: {e}")
