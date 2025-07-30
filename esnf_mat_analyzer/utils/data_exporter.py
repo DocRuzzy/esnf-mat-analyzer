@@ -10,6 +10,7 @@ import csv
 from pathlib import Path
 from typing import Dict, Tuple, List
 import logging
+import piexif
 
 from esnf_mat_analyzer.core.interfaces import DataExporterInterface
 
@@ -161,3 +162,26 @@ class DataExporter(DataExporterInterface):
             for i in range(max_length):
                 row = [i] + list(data[i, :])
                 writer.writerow(row)
+
+    def write_scale_to_metadata(self, image_path: Path, scale: float) -> None:
+        """
+        Write the scale to the image's EXIF metadata.
+
+        Args:
+            image_path: Path to the image file.
+            scale: The scale in pixels per millimeter.
+        """
+        try:
+            exif_dict = piexif.load(str(image_path))
+        except Exception:
+            exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+
+        user_comment = f"pixels_per_mm:{scale}"
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(user_comment, encoding="unicode")
+
+        try:
+            exif_bytes = piexif.dump(exif_dict)
+            piexif.insert(exif_bytes, str(image_path))
+            self.logger.info(f"Successfully wrote scale to {image_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to write EXIF data to {image_path}: {e}")

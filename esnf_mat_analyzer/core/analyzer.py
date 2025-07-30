@@ -40,7 +40,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         self.logger = logging.getLogger(__name__)
         self.logger.info("NanoFiberAnalyzer initialized.")
 
-    def process_image(self, image_path: Path, roi: Optional[tuple[int, int, int, int]] = None) -> AnalysisResult:
+    def process_image(self, image_path: Path, roi: Optional[tuple[int, int, int, int]] = None, spatial_scale_pixels_per_mm: Optional[float] = None) -> AnalysisResult:
         """
         Processes a single image to analyze nanofiber mat properties.
         """
@@ -57,13 +57,10 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             self.logger.error(f"Failed to load image {image_path}: {ve}")
             raise
 
-        # Crop image if ROI is provided
-        if roi:
-            raw_image = self.image_processor.crop_image(raw_image, roi)
-
         # 2. Ruler Detection (on raw image, if enabled)
-        spatial_scale_pixels_per_mm: Optional[float] = None
-        if self.config.ruler_detection.enabled and self.ruler_detector:
+        if spatial_scale_pixels_per_mm:
+            self.logger.info(f"Using provided spatial scale: {spatial_scale_pixels_per_mm:.2f} pixels/mm.")
+        elif self.config.ruler_detection.enabled and self.ruler_detector:
             self.logger.info("Attempting scale detection...")
             try:
                 spatial_scale_pixels_per_mm = self.ruler_detector.detect_scale(raw_image)
@@ -73,6 +70,10 @@ class NanoFiberAnalyzer(AnalyzerInterface):
                     self.logger.warning("Scale detection did not yield a result.")
             except Exception as e:
                 self.logger.error(f"Error during scale detection: {e}", exc_info=True)
+
+        # Crop image if ROI is provided
+        if roi:
+            raw_image = self.image_processor.crop_image(raw_image, roi)
 
         # 3. Preprocess Image (for shape detection and thickness estimation)
         # It's important that image_processor.preprocess takes the raw_image (RGB)
@@ -121,6 +122,9 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         # Create results directory (example, could be done by data_exporter or visualizer)
         results_output_dir = self.config.output_dir / image_path.stem
         # results_output_dir.mkdir(parents=True, exist_ok=True) # Defer to exporter/visualizer
+
+        if spatial_scale_pixels_per_mm:
+            self.data_exporter.write_scale_to_metadata(image_path, spatial_scale_pixels_per_mm)
 
         result = AnalysisResult(
             image_path=image_path,
