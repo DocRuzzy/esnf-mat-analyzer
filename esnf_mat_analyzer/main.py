@@ -273,8 +273,8 @@ def generate_default_config(output_path: Path) -> None:
         yaml.dump(config_dict, f, default_flow_style=False)
 
 
-def main():
-    """Main entry point for the application."""
+def cli_main():
+    """Main entry point for the command-line interface."""
     # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Analyze nanofiber thickness uniformity from images."
@@ -372,6 +372,10 @@ def main():
 
     return 0
 
+
+def main():
+    """Main entry point for the command-line interface."""
+    return cli_main()
 
 if __name__ == "__main__":
     exit(main())

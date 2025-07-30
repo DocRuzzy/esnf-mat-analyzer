@@ -999,6 +999,24 @@ class MainWindow(tk.Tk):
             return "Very Poor"
 
 
+def main():
+    """Entry point for the GUI application."""
+    import sys
+    from pathlib import Path
+    
+    # Add project root to path if needed
+    project_root = Path(__file__).parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    
+    try:
+        app = MainWindow()
+        app.mainloop()
+    except Exception as e:
+        print(f"Error starting ESNF Mat Analyzer GUI: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
 if __name__ == "__main__":
-    app = MainWindow()
-    app.mainloop()
+    main()
