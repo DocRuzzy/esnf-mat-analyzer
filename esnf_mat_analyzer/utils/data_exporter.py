@@ -177,7 +177,10 @@ class DataExporter(DataExporterInterface):
             exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
 
         user_comment = f"pixels_per_mm:{scale}"
-        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(user_comment, encoding="unicode")
+        # Encode UserComment manually since piexif.helper was removed in newer versions
+        # UserComment format: 8 bytes for character code + text data
+        encoded_comment = b"UNICODE\x00" + user_comment.encode("utf-8")
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = encoded_comment
 
         try:
             exif_bytes = piexif.dump(exif_dict)
