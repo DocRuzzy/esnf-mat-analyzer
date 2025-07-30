@@ -22,12 +22,21 @@ class GrayscaleConversionMethod(Enum):
     LUMINANCE = auto()  # Perceptual luminance-preserving conversion
 
 
+class BackgroundCorrectionMethod(Enum):
+    """Methods for background correction."""
+    NONE = auto()
+    BASIC = auto()
+    ROLLING_BALL = auto()
+    RESTORE = auto()
+    HOMOMORPHIC = auto()
+
 class ThicknessModelType(Enum):
     """Models for converting brightness to thickness."""
 
     LINEAR = auto()  # Linear model: thickness = a * brightness + b
     LOGARITHMIC = auto()  # Log model: thickness = a * log(1 + brightness) + b
     EXPONENTIAL = auto()  # Exp model: thickness = a * (exp(brightness / 255) - 1) + b
+    BEER_LAMBERT = auto()
 
 
 @dataclass
@@ -48,6 +57,9 @@ class ProcessingConfig:
     leveling: LevelingConfig = field(default_factory=LevelingConfig)
     """Background leveling configuration."""
 
+    background_correction_method: BackgroundCorrectionMethod = BackgroundCorrectionMethod.NONE
+    """Method for background correction."""
+
     blur_kernel_size: int = 5
     """Size of Gaussian blur kernel. Should be odd. Set to 0 to disable blurring."""
 
@@ -59,6 +71,27 @@ class ProcessingConfig:
 
     grayscale_conversion: GrayscaleConversionMethod = GrayscaleConversionMethod.WEIGHTED
     """Method used for converting RGB images to grayscale."""
+
+    basic_correction_n_components: int = 1
+    """Number of components for BaSiC correction."""
+
+    rolling_ball_radius: int = 50
+    """Radius for rolling ball background correction."""
+
+    restore_percentile: float = 5.0
+    """Percentile for RESTORE background correction."""
+
+    homomorphic_cutoff: float = 30
+    """Cutoff frequency for homomorphic filter."""
+
+    homomorphic_g_low: float = 0.5
+    """Low gain for homomorphic filter."""
+
+    homomorphic_g_high: float = 2.0
+    """High gain for homomorphic filter."""
+
+    saturation_recovery: bool = False
+    """Enable or disable saturation recovery."""
 
 
 @dataclass
@@ -106,6 +139,9 @@ class ThicknessConfig:
     calibration_factor: Optional[float] = None
     """Optional calibration factor for converting to absolute units (e.g., nm)."""
 
+    attenuation_coefficient: float = 0.04778
+    """Attenuation coefficient for Beer-Lambert law."""
+
 
 @dataclass
 class UniformityConfig:
@@ -128,6 +164,18 @@ class UniformityConfig:
 
     ignore_saturated: bool = True
     """Whether to exclude saturated pixels from uniformity calculations."""
+
+    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
+    """Distances for GLCM calculation."""
+
+    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
+    """Angles for GLCM calculation."""
+
+    lbp_radius: int = 1
+    """Radius for LBP calculation."""
+
+    lbp_points: int = 8
+    """Number of points for LBP calculation."""
 
 
 @dataclass
