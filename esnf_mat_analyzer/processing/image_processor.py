@@ -103,6 +103,30 @@ class ImageProcessor(ImageProcessorInterface):
         self.logger.debug(f"Applied contrast (alpha={alpha}) and brightness (beta={beta}).")
         return adjusted_image
 
+    def _apply_leveling(self, image: np.ndarray) -> np.ndarray:
+        """Applies background leveling using a median blur."""
+        if not self.config.leveling.enabled:
+            return image
+
+        self.logger.debug("Applying background leveling.")
+        kernel_size = self.config.leveling.kernel_size
+
+        # Ensure kernel size is odd
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+
+        # Estimate background with a median blur
+        background = cv2.medianBlur(image, kernel_size)
+
+        # Subtract background
+        leveled_image = cv2.subtract(image, background)
+
+        # Invert back
+        leveled_image = cv2.bitwise_not(leveled_image)
+
+        self.logger.debug("Background leveling complete.")
+        return leveled_image
+
     def preprocess(self, image: np.ndarray) -> np.ndarray:
         """
         Preprocess the image for analysis.
@@ -115,10 +139,13 @@ class ImageProcessor(ImageProcessorInterface):
         # 1. Grayscale conversion
         processed_image = self._apply_grayscale(image)
 
-        # 2. Blur
+        # 2. Background Leveling
+        processed_image = self._apply_leveling(processed_image)
+
+        # 3. Blur
         processed_image = self._apply_blur(processed_image)
 
-        # 3. Contrast/Brightness (on grayscale image)
+        # 4. Contrast/Brightness (on grayscale image)
         processed_image = self._apply_contrast_brightness(processed_image)
 
         self.logger.info("Image preprocessing complete.")

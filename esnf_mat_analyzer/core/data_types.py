@@ -31,8 +31,22 @@ class ThicknessModelType(Enum):
 
 
 @dataclass
+class LevelingConfig:
+    """Configuration for background leveling."""
+
+    enabled: bool = True
+    """Enable or disable background leveling."""
+
+    kernel_size: int = 25
+    """Size of the kernel for morphological operations."""
+
+
+@dataclass
 class ProcessingConfig:
     """Configuration parameters for image preprocessing."""
+
+    leveling: LevelingConfig = field(default_factory=LevelingConfig)
+    """Background leveling configuration."""
 
     blur_kernel_size: int = 5
     """Size of Gaussian blur kernel. Should be odd. Set to 0 to disable blurring."""
