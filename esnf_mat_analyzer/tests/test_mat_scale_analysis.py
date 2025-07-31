@@ -136,17 +136,16 @@ def test_integrated_mat_analysis():
     logger.info("Testing Integrated Mat Uniformity Analyzer...")
     
     try:
-        from esnf_mat_analyzer.analysis.uniformity_metrics import MatUniformityAnalyzer
+        from esnf_mat_analyzer.analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
         from esnf_mat_analyzer.core.data_types import UniformityConfig
         
         # Create config
-        config = UniformityConfig()
-        analyzer = MatUniformityAnalyzer(config)
+        analyzer = MultiScaleUniformityAnalyzer()
         test_data = create_test_data()
         
         for name, (thickness_map, mask) in test_data.items():
             logger.info(f"Performing comprehensive analysis on {name} mat...")
-            results = analyzer.analyze_mat_uniformity(thickness_map, mask)
+            results = analyzer.analyze_multiscale_uniformity(thickness_map, mask)
             
             print(f"\n{name.upper()} MAT - Comprehensive Analysis:")
             print("=" * 50)
@@ -237,12 +236,10 @@ def test_with_real_image():
                 _, mask = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 
                 # Test integrated analysis
-                from esnf_mat_analyzer.analysis.uniformity_metrics import MatUniformityAnalyzer
-                from esnf_mat_analyzer.core.data_types import UniformityConfig
+                from esnf_mat_analyzer.analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
                 
-                config = UniformityConfig()
-                analyzer = MatUniformityAnalyzer(config)
-                results = analyzer.analyze_mat_uniformity(image, mask)
+                analyzer = MultiScaleUniformityAnalyzer()
+                results = analyzer.analyze_multiscale_uniformity(image, mask)
                 
                 print(f"\nREAL IMAGE ({sample_path.name}) - Mat Analysis:")
                 print("=" * 50)

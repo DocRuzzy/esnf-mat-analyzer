@@ -251,9 +251,9 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         
         # Mat-scale uniformity analysis
         try:
-            from ..analysis.uniformity_metrics import MatUniformityAnalyzer
-            mat_analyzer = MatUniformityAnalyzer(self.config.uniformity)
-            mat_metrics = mat_analyzer.analyze_mat_uniformity(thickness_map, mask)
+            from ..analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
+            mat_analyzer = MultiScaleUniformityAnalyzer()
+            mat_metrics = mat_analyzer.analyze_multiscale_uniformity(thickness_map, mask)
             metrics.update(mat_metrics)
             self.logger.debug(f"Mat-scale uniformity metrics calculated: {len(mat_metrics)} metrics")
         except Exception as e:

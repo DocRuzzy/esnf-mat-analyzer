@@ -25,6 +25,7 @@ class RadialUniformityIndex(IUniformityMetric):
             config: Configuration parameters for uniformity analysis
         """
         self.config = config
+        self.name = "RadialUniformityIndex"
     
     def calculate_metric(self, thickness_map: np.ndarray, roi_mask: np.ndarray) -> float:
         """
@@ -87,6 +88,20 @@ class RadialUniformityIndex(IUniformityMetric):
         rui = max(0.0, 1.0 - cv)
         
         return min(1.0, rui)
+    
+    def calculate(self, thickness_map: np.ndarray, roi_mask: np.ndarray, *args) -> float:
+        """
+        Legacy method for compatibility with analyzer that expects calculate() method.
+        
+        Args:
+            thickness_map: 2D thickness map
+            roi_mask: Boolean mask indicating the region of interest
+            *args: Additional arguments (ignored for compatibility)
+            
+        Returns:
+            Radial Uniformity Index (0-1, higher is more uniform)
+        """
+        return self.calculate_metric(thickness_map, roi_mask)
 
 class GiniCoefficient(IUniformityMetric):
     """
@@ -94,6 +109,16 @@ class GiniCoefficient(IUniformityMetric):
     
     Lower values indicate better uniformity (more equal thickness distribution).
     """
+    
+    def __init__(self, config: UniformityConfig = None):
+        """
+        Initialize the GiniCoefficient with configuration.
+        
+        Args:
+            config: Configuration parameters for uniformity analysis (optional)
+        """
+        self.config = config
+        self.name = "GiniCoefficient"
     
     def calculate_metric(self, thickness_map: np.ndarray, roi_mask: np.ndarray) -> float:
         """
@@ -139,6 +164,20 @@ class GiniCoefficient(IUniformityMetric):
         gini = (2.0 * weighted_sum) / (n * total_sum) - (n + 1.0) / n
         
         return max(0.0, min(1.0, gini))
+    
+    def calculate(self, thickness_map: np.ndarray, roi_mask: np.ndarray, *args) -> float:
+        """
+        Legacy method for compatibility with analyzer that expects calculate() method.
+        
+        Args:
+            thickness_map: 2D thickness map
+            roi_mask: Boolean mask indicating the region of interest
+            *args: Additional arguments (ignored for compatibility)
+            
+        Returns:
+            Gini coefficient (0-1, lower is more uniform)
+        """
+        return self.calculate_metric(thickness_map, roi_mask)
 
 class ThicknessRangeRatio(IUniformityMetric):
     """
@@ -146,6 +185,16 @@ class ThicknessRangeRatio(IUniformityMetric):
     
     Higher values indicate better uniformity.
     """
+    
+    def __init__(self, config: UniformityConfig = None):
+        """
+        Initialize the ThicknessRangeRatio with configuration.
+        
+        Args:
+            config: Configuration parameters for uniformity analysis (optional)
+        """
+        self.config = config
+        self.name = "ThicknessRangeRatio"
     
     def calculate_metric(self, thickness_map: np.ndarray, roi_mask: np.ndarray) -> float:
         """
@@ -183,3 +232,17 @@ class ThicknessRangeRatio(IUniformityMetric):
         ratio = min_thickness / max_thickness
         
         return max(0.0, min(1.0, ratio))
+    
+    def calculate(self, thickness_map: np.ndarray, roi_mask: np.ndarray, *args) -> float:
+        """
+        Legacy method for compatibility with analyzer that expects calculate() method.
+        
+        Args:
+            thickness_map: 2D thickness map
+            roi_mask: Boolean mask indicating the region of interest
+            *args: Additional arguments (ignored for compatibility)
+            
+        Returns:
+            Thickness Range Ratio (0-1, higher is more uniform)
+        """
+        return self.calculate_metric(thickness_map, roi_mask)

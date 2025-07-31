@@ -24,6 +24,40 @@ class ImageProcessor(IImageProcessor):
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ImageProcessor initialized with config: {self.config}")
 
+    def load_image(self, path: Path) -> np.ndarray:
+        """
+        Load an image from the specified path.
+        
+        Args:
+            path: Path to the image file
+            
+        Returns:
+            Loaded image as a numpy array (RGB format)
+            
+        Raises:
+            FileNotFoundError: If the image file does not exist
+            ValueError: If the image cannot be loaded
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"Image file not found: {path}")
+        
+        try:
+            # Load image using cv2 (loads in BGR format)
+            image_bgr = cv2.imread(str(path))
+            
+            if image_bgr is None:
+                raise ValueError(f"Could not load image from {path}. File may be corrupted or in an unsupported format.")
+            
+            # Convert BGR to RGB
+            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+            
+            self.logger.debug(f"Loaded image from {path} with shape {image_rgb.shape}")
+            return image_rgb
+            
+        except Exception as e:
+            self.logger.error(f"Error loading image from {path}: {e}")
+            raise ValueError(f"Failed to load image: {e}")
+
     def process(self, image: np.ndarray, config: 'ProcessingConfig') -> np.ndarray:
         """Process raw image according to configuration."""
         self.logger.debug("Starting image preprocessing.")
@@ -43,6 +77,56 @@ class ImageProcessor(IImageProcessor):
         self.logger.info("Image preprocessing complete.")
         return processed_image
 
+    def preprocess(self, image: np.ndarray) -> np.ndarray:
+        """
+        Preprocess raw image using the instance configuration.
+        
+        Args:
+            image: Raw image array (RGB format)
+            
+        Returns:
+            Preprocessed grayscale image
+        """
+        return self.process(image, self.config)
+
+    def crop_image(self, image: np.ndarray, roi: tuple) -> np.ndarray:
+        """
+        Crop image to the specified region of interest.
+        
+        Args:
+            image: Input image array
+            roi: Region of interest as (x, y, width, height)
+            
+        Returns:
+            Cropped image array
+            
+        Raises:
+            ValueError: If ROI is invalid or outside image bounds
+        """
+        if len(roi) != 4:
+            raise ValueError(f"ROI must be a tuple of 4 values (x, y, width, height), got {len(roi)} values")
+        
+        x, y, width, height = roi
+        
+        # Validate ROI parameters
+        if x < 0 or y < 0 or width <= 0 or height <= 0:
+            raise ValueError(f"Invalid ROI parameters: x={x}, y={y}, width={width}, height={height}")
+        
+        # Check image bounds
+        img_height, img_width = image.shape[:2]
+        if x + width > img_width or y + height > img_height:
+            self.logger.warning(f"ROI extends beyond image bounds. Image: {img_width}x{img_height}, ROI: {x},{y},{width},{height}")
+            # Clamp to image bounds
+            width = min(width, img_width - x)
+            height = min(height, img_height - y)
+            self.logger.info(f"Adjusted ROI to fit image bounds: {x},{y},{width},{height}")
+        
+        # Crop the image
+        cropped = image[y:y+height, x:x+width]
+        
+        self.logger.debug(f"Cropped image from {image.shape} to {cropped.shape} using ROI {roi}")
+        return cropped
+
     def _apply_grayscale(self, image: np.ndarray) -> np.ndarray:
         """Applies grayscale conversion based on config."""
         if len(image.shape) == 2: # Already grayscale
@@ -52,18 +136,25 @@ class ImageProcessor(IImageProcessor):
              return image
 
         method = self.config.grayscale_conversion
-        if method == "WEIGHTED":
+        
+        # Handle both enum and string values for compatibility
+        if hasattr(method, 'name'):
+            method_name = method.name
+        else:
+            method_name = str(method).upper()
+        
+        if method_name == "WEIGHTED":
             # Standard RGB to Grayscale conversion: Y = 0.299R + 0.587G + 0.114B
             gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        elif method == "AVERAGE":
+        elif method_name == "AVERAGE":
             gray_image = np.mean(image, axis=2).astype(np.uint8)
-        elif method == "LUMINANCE": # Perceptual luminance (closer to human perception)
+        elif method_name == "LUMINANCE": # Perceptual luminance (closer to human perception)
             # Using a common formula, slightly different from OpenCV's default weighted
             gray_image = (0.2126 * image[:,:,0] + 0.7152 * image[:,:,1] + 0.0722 * image[:,:,2]).astype(np.uint8)
         else:
             self.logger.warning(f"Unknown grayscale method: {method}. Defaulting to WEIGHTED.")
             gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        self.logger.debug(f"Applied grayscale conversion using {method}.")
+        self.logger.debug(f"Applied grayscale conversion using {method_name}.")
         return gray_image
 
     def _apply_blur(self, image: np.ndarray) -> np.ndarray:

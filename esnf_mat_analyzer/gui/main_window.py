@@ -28,7 +28,9 @@ class MainWindow(tk.Tk):
         self.geometry("1200x800")
 
         self.selected_files = []
+        self.current_image_path = None
         self.current_image = None
+        self.current_image_path = None
         self.displayed_image = None
         self.tk_image = None
         self.rect = None
@@ -105,7 +107,7 @@ class MainWindow(tk.Tk):
             ("Default (Normalization)", "none"),
             ("BASIC (Robust)", "basic"),
             ("Rolling Ball", "rolling_ball"),
-            ("RESTORE", "restore"),
+            ("Percentile BG", "restore"),
             ("Homomorphic", "homomorphic")
         ]
 
@@ -133,7 +135,7 @@ class MainWindow(tk.Tk):
         self.thickness_model_var = tk.StringVar(value="beer_lambert")
         thickness_models = [
             ("Beer-Lambert (Physics)", "beer_lambert"),
-            ("Linear (Legacy)", "linear"),
+            ("Linear", "linear"),
             ("Logarithmic", "logarithmic"),
             ("Exponential", "exponential")
         ]
@@ -259,6 +261,7 @@ class MainWindow(tk.Tk):
         try:
             image = Image.open(filepath)
             self.current_image = image
+            self.current_image_path = filepath  # Store the file path
             self.fit_to_window()
         except Exception as e:
             print(f"Error loading image: {e}")
@@ -600,7 +603,7 @@ class MainWindow(tk.Tk):
 
     def preview_background_methods(self):
         """Show a comparison of different background correction methods."""
-        if not self.current_image:
+        if not self.current_image or not self.current_image_path:
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
@@ -616,23 +619,63 @@ class MainWindow(tk.Tk):
         # Load and preprocess the image
         try:
             import cv2
-            raw_image = cv2.imread(str(self.current_image))
+            raw_image = cv2.imread(str(self.current_image_path))
             raw_image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
             gray_image = cv2.cvtColor(raw_image_rgb, cv2.COLOR_RGB2GRAY)
 
-            # Define methods to test
+            # Define methods to test with descriptions and links
             methods = [
-                ("Default (Normalization)", "none", self._apply_default_correction),
-                ("BASIC (Robust)", "basic", self._apply_basic_correction),
-                ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction),
-                ("RESTORE", "restore", self._apply_restore_correction),
-                ("Homomorphic", "homomorphic", self._apply_homomorphic_correction)
+                ("Default (Normalization)", "none", self._apply_default_correction, 
+                 "Simple normalization by local background estimation using median filtering.",
+                 "https://en.wikipedia.org/wiki/Background_subtraction"),
+                ("BASIC (Robust)", "basic", self._apply_basic_correction,
+                 "Robust background correction using polynomial fitting and statistical outlier removal.",
+                 "https://scikit-image.org/docs/stable/auto_examples/color_exposure/plot_local_equalize.html"),
+                ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction,
+                 "ImageJ-style rolling ball algorithm that estimates background by rolling a sphere under the image surface.",
+                 "https://imagej.net/plugins/rolling-ball-background-subtraction"),
+                ("Percentile BG", "restore", self._apply_restore_correction,
+                 "Automatic negative control region identification. Uses the darkest regions (lowest percentile) as background reference for subtraction.",
+                 "https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_thresholding.html"),
+                ("Homomorphic", "homomorphic", self._apply_homomorphic_correction,
+                 "Frequency domain filtering that separates illumination from reflectance components.",
+                 "https://en.wikipedia.org/wiki/Homomorphic_filtering")
             ]
 
-            for method_name, method_id, method_func in methods:
+            for method_name, method_id, method_func, description, learn_more_url in methods:
                 # Create tab for this method
                 tab_frame = ttk.Frame(notebook)
                 notebook.add(tab_frame, text=method_name)
+
+                # Create a frame for the description and link at the top
+                info_frame = ttk.Frame(tab_frame)
+                info_frame.pack(fill=tk.X, padx=10, pady=5)
+                
+                # Add description
+                desc_label = ttk.Label(info_frame, text=description, wraplength=400, justify=tk.LEFT)
+                desc_label.pack(anchor=tk.W)
+                
+                # Add clickable link
+                link_label = ttk.Label(info_frame, text="📖 Learn more about this method", 
+                                     foreground="blue", cursor="hand2")
+                link_label.pack(anchor=tk.W, pady=(2, 0))
+                
+                # Make the link clickable
+                def open_link(url=learn_more_url):
+                    import webbrowser
+                    webbrowser.open(url)
+                
+                link_label.bind("<Button-1>", lambda e, url=learn_more_url: open_link(url))
+                
+                # Add hover effect
+                def on_enter(e, label=link_label):
+                    label.configure(foreground="darkblue")
+                
+                def on_leave(e, label=link_label):
+                    label.configure(foreground="blue")
+                
+                link_label.bind("<Enter>", on_enter)
+                link_label.bind("<Leave>", on_leave)
 
                 # Apply the background correction method
                 try:
@@ -701,7 +744,7 @@ class MainWindow(tk.Tk):
         return processor.rolling_ball_3d(image, 50)
 
     def _apply_restore_correction(self, image):
-        """Apply RESTORE correction."""
+        """Apply Percentile BG correction."""
         from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.restore_method(image, 5.0)
@@ -980,6 +1023,26 @@ class MainWindow(tk.Tk):
                 else:
                     mat_result += f"  {clean_name}: {value}\n"
         
+        # Multiscale uniformity metrics
+        scale_metrics = {k: v for k, v in result.metrics.items() if k.startswith('scale_') and k.endswith('_uniformity')}
+        if scale_metrics:
+            mat_result += "Multiscale Uniformity Analysis:\n"
+            mat_result += "-" * 35 + "\n"
+            for name, value in sorted(scale_metrics.items()):
+                scale_level = name.replace('scale_', '').replace('_uniformity', '')
+                if isinstance(value, float) and not math.isnan(value):
+                    mat_result += f"  Scale Level {scale_level}: {value:.4f}\n"
+                else:
+                    mat_result += f"  Scale Level {scale_level}: {value}\n"
+            
+            # Calculate overall multiscale score
+            valid_values = [v for v in scale_metrics.values() if isinstance(v, float) and not math.isnan(v)]
+            if valid_values:
+                overall_multiscale = np.mean(valid_values)
+                mat_result += f"\n  Overall Multiscale Uniformity: {overall_multiscale:.4f}\n"
+                mat_result += f"  Multiscale Rating: {self._get_uniformity_rating(overall_multiscale)}\n"
+            mat_result += "\n"
+        
         # Add interpretation guide
         mat_result += "\n" + "=" * 40 + "\n"
         mat_result += "Interpretation Guide:\n"
@@ -989,6 +1052,7 @@ class MainWindow(tk.Tk):
         mat_result += "- Correlation: Measures linear dependencies in texture\n"
         mat_result += "- Contrast: Lower values indicate smoother texture\n"
         mat_result += "- PSD Uniformity: Higher values indicate more uniform frequency distribution\n"
+        mat_result += "- Multiscale Uniformity: Higher values indicate better uniformity at different length scales\n"
         
         mat_text.insert(tk.END, mat_result)
         mat_text.config(state=tk.DISABLED)
