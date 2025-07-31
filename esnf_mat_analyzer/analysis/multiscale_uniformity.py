@@ -2,6 +2,7 @@ import numpy as np
 from typing import Dict
 import logging
 
+
 class MultiScaleUniformityAnalyzer:
     """Multi-scale uniformity analysis using wavelet decomposition.
 
@@ -23,18 +24,20 @@ class MultiScaleUniformityAnalyzer:
     rulers, background, and non-mat regions from the evaluation.
     
     Example:
-        analyzer = MultiScaleUniformityAnalyzer(wavelet='db4', levels=4)
+        analyzer = MultiScaleUniformityAnalyzer(wavelet='db4', levels=4, max_coefficients=100000)
         results = analyzer.analyze_multiscale_uniformity(thickness_map, roi_mask)
         # Results: {'scale_0_uniformity': 0.85, 'scale_1_uniformity': 0.92, ...}
     """
 
-    def __init__(self, wavelet: str = 'db4', levels: int = 4):
+    def __init__(self, wavelet: str = 'db4', levels: int = 4, max_coefficients: int = 100000):
         self.wavelet = wavelet
         self.levels = levels
+        self.max_coefficients = max_coefficients
         self.logger = logging.getLogger(__name__)
 
     def analyze_multiscale_uniformity(self, thickness_map: np.ndarray,
-                                    roi_mask: np.ndarray
+                                    roi_mask: np.ndarray,
+                                    max_coefficients: int = None
                                    ) -> Dict[str, np.ndarray]:
         """Perform multi-scale uniformity analysis using wavelet decomposition.
 
@@ -76,6 +79,10 @@ class MultiScaleUniformityAnalyzer:
         except ImportError:
             # Fallback to simple multi-resolution analysis
             return self._fallback_multiscale_analysis(thickness_map, roi_mask)
+
+        # Use instance default if not provided
+        if max_coefficients is None:
+            max_coefficients = self.max_coefficients
 
         # Validate inputs
         if thickness_map.size == 0 or roi_mask.size == 0:
@@ -184,23 +191,29 @@ class MultiScaleUniformityAnalyzer:
             # Validate scale data
             if scale_data is None or len(scale_data) == 0:
                 continue  # Don't add 0.0 uniformity for invalid scales
-                
+
             # Ensure scale_data is 1D and remove any remaining NaN values
             if scale_data.ndim > 1:
                 scale_data = scale_data.flatten()
-            
+
             # Remove NaN and infinite values
             valid_data = scale_data[np.isfinite(scale_data)]
-            
+
+            # Subsample if too large
+            if len(valid_data) > max_coefficients:
+                self.logger.warning(f"Subsampling {len(valid_data)} coefficients to {max_coefficients} for scale {level} to avoid memory issues.")
+                indices = np.random.choice(len(valid_data), max_coefficients, replace=False)
+                valid_data = valid_data[indices]
+
             if len(valid_data) < 2:  # Need at least 2 values for meaningful statistics
                 continue  # Don't add 0.0 uniformity for scales with insufficient data
-                
+
             # Calculate uniformity using appropriate metric for each scale
             std_val = np.std(valid_data)
             mean_val = np.mean(valid_data)
-            
+
             self.logger.debug(f"Scale {level}: {len(valid_data)} valid data points, mean={mean_val:.6f}, std={std_val:.6f}")
-            
+
             if level == 0:
                 # For approximation coefficients (scale 0), use coefficient of variation
                 # Scale 0 represents large-scale thickness trends and gradients

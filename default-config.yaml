@@ -40,6 +40,7 @@ uniformity:
   bin_count: 50
   num_radial_lines: 36
   smoothing_factor: 0.5
+  max_coefficients: 100000
 visualization:
   colormap: viridis
   dpi: 300

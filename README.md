@@ -71,10 +71,17 @@ git clone https://github.com/DocRuzzy/esnf-mat-analyzer.git
 cd esnf-mat-analyzer
 ```
 
-2. **Run the automated setup:**
+
+2. **Run the automated setup (recommended for all users and JOSS reviewers):**
 ```bash
 python setup_environment.py
 ```
+
+This script will:
+- Check your Python version and environment
+- Install all required dependencies (including optional ones for full functionality)
+- Install the package in editable mode for development
+- Verify all imports and create run scripts for your platform
 
 3. **Start the application:**
 ```bash
@@ -88,12 +95,13 @@ python run_esnf_analyzer.py
 pip install esnf-mat-analyzer
 ```
 
-**For development:**
+
+**For development (advanced users):**
+If you want to manually install in editable mode, you can still use:
 ```bash
-git clone https://github.com/DocRuzzy/esnf-mat-analyzer.git
-cd esnf-mat-analyzer
 pip install -e .
 ```
+But this is not required if you use `python setup_environment.py`.
 
 ## Usage
 
@@ -205,12 +213,16 @@ We welcome contributions from the research community:
 3. **Make your changes** with appropriate tests
 4. **Submit a pull request** with a clear description
 
-### Development Setup
+
+### Development Setup (recommended)
 ```bash
 git clone https://github.com/DocRuzzy/esnf-mat-analyzer.git
 cd esnf-mat-analyzer
 python setup_environment.py
-pip install -e ".[dev]"
+```
+If you want to install extra development tools, you may also run:
+```bash
+pip install -e .[dev]
 ```
 
 ## Testing

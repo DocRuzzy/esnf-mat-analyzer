@@ -204,38 +204,26 @@ class ThicknessConfig:
 
 
 @dataclass
+
+from dataclasses import dataclass, field
+from typing import List
+
+@dataclass
 class UniformityConfig:
     """Configuration parameters for uniformity analysis."""
 
     num_radial_lines: int = 36
-    """Number of radial lines for radial uniformity analysis."""
-
     bin_count: int = 50
-    """Number of bins for histograms."""
-
     smoothing_factor: float = 0.5
-    """Factor for smoothing radial profiles (0.0 to 1.0)."""
-
     min_thickness_percentile: float = 5.0
-    """Percentile to use for minimum thickness in range calculations."""
-
     max_thickness_percentile: float = 95.0
-    """Percentile to use for maximum thickness in range calculations."""
-
     ignore_saturated: bool = True
-    """Whether to exclude saturated pixels from uniformity calculations."""
-
     glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
-    """Distances for GLCM calculation."""
-
     glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
-    """Angles for GLCM calculation."""
-
     lbp_radius: int = 1
-    """Radius for LBP calculation."""
-
     lbp_points: int = 8
-    """Number of points for LBP calculation."""
+    max_coefficients: int = 100000
+    """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
 
 
 @dataclass
@@ -317,38 +305,22 @@ class ExportConfig:
 
 
 @dataclass
-class Config:
-    """Main configuration container."""
 
-    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
-    """Image processing configuration."""
-
-    shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
-    """Shape detection configuration."""
-
-    thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
-    """Thickness estimation configuration."""
-
-    uniformity: UniformityConfig = field(default_factory=UniformityConfig)
-    """Uniformity analysis configuration."""
-
-    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
-    """Visualization configuration."""
-
-    ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
-    """Ruler detection configuration."""
-
-    export: ExportConfig = field(default_factory=ExportConfig)
-    """Export configuration."""
-
-    output_dir: Path = Path("./output")
-    """Directory for saving results."""
-
-    log_level: int = logging.INFO
-    """Logging level."""
-
-    cache_intermediates: bool = True
-    """Whether to cache intermediate results."""
+@dataclass
+class UniformityConfig:
+    """Configuration parameters for uniformity analysis."""
+    num_radial_lines: int = 36
+    bin_count: int = 50
+    smoothing_factor: float = 0.5
+    min_thickness_percentile: float = 5.0
+    max_thickness_percentile: float = 95.0
+    ignore_saturated: bool = True
+    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
+    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
+    lbp_radius: int = 1
+    lbp_points: int = 8
+    max_coefficients: int = 100000
+    """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
 
 
 @dataclass

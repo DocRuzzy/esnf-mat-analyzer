@@ -179,6 +179,7 @@ def config_to_dict(config: Config) -> Dict[str, Any]:
         "glcm_angles": config.uniformity.glcm_angles,
         "lbp_radius": config.uniformity.lbp_radius,
         "lbp_points": config.uniformity.lbp_points,
+        "max_coefficients": config.uniformity.max_coefficients,
     }
 
     visualization_dict = {
@@ -318,6 +319,8 @@ def dict_to_config(config_dict: Dict[str, Any]) -> Config:
             uniformity_config.lbp_radius = int(unif_dict["lbp_radius"])
         if "lbp_points" in unif_dict:
             uniformity_config.lbp_points = int(unif_dict["lbp_points"])
+        if "max_coefficients" in unif_dict:
+            uniformity_config.max_coefficients = int(unif_dict["max_coefficients"])
 
     if "visualization" in config_dict:
         vis_dict = config_dict["visualization"]

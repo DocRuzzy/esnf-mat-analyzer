@@ -123,6 +123,7 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         num_radial_lines=config_data.get("uniformity", {}).get("num_radial_lines", 36),
         bin_count=config_data.get("uniformity", {}).get("bin_count", 50),
         smoothing_factor=config_data.get("uniformity", {}).get("smoothing_factor", 0.5),
+        max_coefficients=config_data.get("uniformity", {}).get("max_coefficients", 100000),
     )
 
     # Create visualization config

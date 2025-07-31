@@ -5,8 +5,37 @@ from pathlib import Path
 from typing import Dict, Any
 import time # Added for save_debug_image
 
+
 from ..core.interfaces import IImageProcessor
 from ..core.data_types import ProcessingConfig
+# Import the mat-level background processor
+from ..processing.mat_level_background_correction import MatLevelBackgroundProcessor
+
+def assess_correction_quality(original, corrected, mat_mask):
+    """
+    Calculate quality metrics for background correction.
+    Args:
+        original: Original image (np.ndarray)
+        corrected: Corrected image (np.ndarray)
+        mat_mask: Boolean mask (True for mat region)
+    Returns:
+        dict with background_cv, mat_preservation, gradient_correlation
+    """
+    import numpy as np
+    # Background uniformity (lower is better)
+    bg_cv = np.std(corrected[~mat_mask]) / np.mean(corrected[~mat_mask])
+    # Mat signal preservation (higher is better)
+    mat_mean_ratio = np.mean(corrected[mat_mask]) / np.mean(original[mat_mask])
+    # Gradient preservation within mat
+    grad_correlation = np.corrcoef(
+        np.gradient(original[mat_mask])[0],
+        np.gradient(corrected[mat_mask])[0]
+    )[0, 1]
+    return {
+        'background_cv': bg_cv,
+        'mat_preservation': mat_mean_ratio,
+        'gradient_correlation': grad_correlation
+    }
 
 class ImageProcessor(IImageProcessor):
     """
@@ -23,6 +52,9 @@ class ImageProcessor(IImageProcessor):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"ImageProcessor initialized with config: {self.config}")
+
+        # Initialize mat-level background processor
+        self.mat_bg_processor = MatLevelBackgroundProcessor()
 
     def load_image(self, path: Path) -> np.ndarray:
         """
@@ -183,33 +215,56 @@ class ImageProcessor(IImageProcessor):
     def _apply_leveling(self, image: np.ndarray) -> np.ndarray:
         """
         Applies background correction to handle non-uniform illumination.
-        
-        This method preserves the natural relationship where:
-        - White/bright areas (fiber accumulation) remain high values
-        - Dark areas (background) become low values 
-        - Non-uniform illumination is corrected based on the selected method
+        Supports advanced mat-level methods as recommended in the integration guide.
         """
         if not self.config.leveling.enabled:
             return image
 
         method = getattr(self.config, 'background_correction_method', None)
-        
-        if method is None or method.name == 'NONE':
-            # Use the default normalization method for backward compatibility
-            return self._apply_normalization_correction(image)
-        
-        from ..processing.advanced_background import AdvancedBackgroundProcessor
-        processor = AdvancedBackgroundProcessor()
-        
-        if method.name == 'BASIC':
+        # Accept both string and enum
+        method_name = getattr(method, 'name', str(method).lower() if method else 'none').lower()
+
+        # Mat-level background correction methods
+        if method_name in ['polynomial_surface', 'polynomial']:
+            return self.mat_bg_processor.adaptive_polynomial_surface_fitting(
+                image,
+                polynomial_order=getattr(self.config, 'polynomial_order', 3),
+                sample_density=getattr(self.config, 'sample_density', 0.05)
+            )
+        elif method_name == 'two_stage':
+            return self.mat_bg_processor.two_stage_correction(image)
+        elif method_name == 'region_leveling':
+            return self.mat_bg_processor.region_based_leveling(image)
+        elif method_name == 'selective_illumination':
+            return self.mat_bg_processor.selective_illumination_correction(
+                image,
+                preserve_threshold=getattr(self.config, 'preserve_threshold', 0.7),
+                blur_size=getattr(self.config, 'blur_size', 101)
+            )
+        # Fallback to legacy/other methods
+        elif method_name == 'basic':
+            from ..processing.advanced_background import AdvancedBackgroundProcessor
+            processor = AdvancedBackgroundProcessor()
             return processor.basic_correction(image, self.config.basic_correction_n_components)
-        elif method.name == 'ROLLING_BALL':
+        elif method_name == 'rolling_ball':
+            from ..processing.advanced_background import AdvancedBackgroundProcessor
+            processor = AdvancedBackgroundProcessor()
             return processor.rolling_ball_3d(image, self.config.rolling_ball_radius)
-        elif method.name == 'RESTORE':
+        elif method_name == 'restore':
+            from ..processing.advanced_background import AdvancedBackgroundProcessor
+            processor = AdvancedBackgroundProcessor()
             return processor.restore_method(image, self.config.restore_percentile)
-        elif method.name == 'HOMOMORPHIC':
+        elif method_name == 'homomorphic':
+            from ..processing.advanced_background import AdvancedBackgroundProcessor
+            processor = AdvancedBackgroundProcessor()
             return processor.homomorphic_filter(image, self.config.homomorphic_cutoff, 
                                                self.config.homomorphic_g_low, self.config.homomorphic_g_high)
+        elif method_name == 'enhanced_percentile':
+            return self.mat_bg_processor.enhanced_percentile_with_gradient_preservation(
+                image,
+                background_percentile=getattr(self.config, 'background_percentile', 5.0),
+                gradient_weight=getattr(self.config, 'gradient_weight', 0.5)
+            )
         else:
             self.logger.warning(f"Unknown background correction method: {method}, using default")
             return self._apply_normalization_correction(image)

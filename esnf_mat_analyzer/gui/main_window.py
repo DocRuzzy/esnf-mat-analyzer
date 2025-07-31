@@ -89,6 +89,7 @@ class MainWindow(tk.Tk):
         )
         self.background_leveling_checkbox.pack(padx=5, pady=2, anchor=tk.W)
 
+
         # Heatmap auto-range checkbox
         self.auto_range_var = tk.BooleanVar(value=True)
         self.auto_range_checkbox = ttk.Checkbutton(
@@ -97,6 +98,14 @@ class MainWindow(tk.Tk):
             variable=self.auto_range_var
         )
         self.auto_range_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+
+        # Max coefficients for multiscale uniformity
+        max_coeff_frame = ttk.Frame(self.analysis_frame)
+        max_coeff_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(max_coeff_frame, text="Max Coefficients (memory limit):").pack(side=tk.LEFT)
+        self.max_coeff_var = tk.IntVar(value=100000)
+        self.max_coeff_spinbox = ttk.Spinbox(max_coeff_frame, from_=1000, to=1000000, increment=1000, textvariable=self.max_coeff_var, width=10)
+        self.max_coeff_spinbox.pack(side=tk.LEFT, padx=2)
 
         # Background correction method selection
         self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction")
@@ -521,9 +530,10 @@ class MainWindow(tk.Tk):
 
         # Create config and analyzer
         config = get_default_config()
-        
         # Update background leveling setting based on checkbox
         config.processing.leveling.enabled = self.background_leveling_var.get()
+        # Update max_coefficients from GUI
+        config.uniformity.max_coefficients = self.max_coeff_var.get()
         
         analyzer = setup_dependencies(config)
 
