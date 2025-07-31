@@ -61,12 +61,14 @@ class BackgroundCorrectionMethod(Enum):
     - ROLLING_BALL: Morphological rolling ball background subtraction
     - RESTORE: Restoration-based background correction
     - HOMOMORPHIC: Frequency domain homomorphic filtering
+    - GAUSSIAN_LOW_PASS: Low-pass Gaussian filter for background subtraction
     """
     NONE = auto()
     BASIC = auto()
     ROLLING_BALL = auto()
     RESTORE = auto()
     HOMOMORPHIC = auto()
+    GAUSSIAN_LOW_PASS = auto()
 
 
 class ThicknessModelType(Enum):
@@ -136,6 +138,9 @@ class ProcessingConfig:
 
     homomorphic_g_high: float = 2.0
     """High gain for homomorphic filter."""
+
+    gaussian_sigma: int = 21
+    """Sigma for Gaussian low-pass filter."""
 
     saturation_recovery: bool = False
     """Enable or disable saturation recovery."""

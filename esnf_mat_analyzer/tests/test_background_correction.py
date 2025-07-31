@@ -63,6 +63,14 @@ def analyze_correction_method(image, corrected_image, method_name):
           f"98th: {np.percentile(corrected_image, 98):.1f}")
 
 
+def test_gaussian_low_pass(image):
+    """Test the Gaussian Low-Pass correction method."""
+    from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+    processor = AdvancedBackgroundProcessor()
+    corrected_image = processor.gaussian_low_pass(image, sigma=21)
+    analyze_correction_method(image, corrected_image, "GAUSSIAN LOW-PASS")
+
+
 def main():
     """Main test function."""
     print("Background Correction Comparison Test")
@@ -91,6 +99,9 @@ def main():
     # Test new method
     new_corrected = new_background_correction(gray_image)
     analyze_correction_method(gray_image, new_corrected, "NEW METHOD (Fixed)")
+
+    # Test Gaussian Low-Pass method
+    test_gaussian_low_pass(gray_image)
     
     # Test full pipeline
     print("\n=== FULL ANALYZER PIPELINE ===")

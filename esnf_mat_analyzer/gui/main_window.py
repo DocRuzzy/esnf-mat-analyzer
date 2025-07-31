@@ -108,7 +108,8 @@ class MainWindow(tk.Tk):
             ("BASIC (Robust)", "basic"),
             ("Rolling Ball", "rolling_ball"),
             ("Percentile BG", "restore"),
-            ("Homomorphic", "homomorphic")
+            ("Homomorphic", "homomorphic"),
+            ("Gaussian Low-Pass", "gaussian_low_pass")
         ]
 
         for text, value in bg_methods:
@@ -639,7 +640,10 @@ class MainWindow(tk.Tk):
                  "https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_thresholding.html"),
                 ("Homomorphic", "homomorphic", self._apply_homomorphic_correction,
                  "Frequency domain filtering that separates illumination from reflectance components.",
-                 "https://en.wikipedia.org/wiki/Homomorphic_filtering")
+                 "https://en.wikipedia.org/wiki/Homomorphic_filtering"),
+                ("Gaussian Low-Pass", "gaussian_low_pass", self._apply_gaussian_low_pass_correction,
+                 "Applies a Gaussian low-pass filter to estimate the background and subtracts it.",
+                 "https://docs.opencv.org/4.x/d4/d13/tutorial_py_filtering.html")
             ]
 
             for method_name, method_id, method_func, description, learn_more_url in methods:
@@ -755,6 +759,12 @@ class MainWindow(tk.Tk):
         processor = AdvancedBackgroundProcessor()
         return processor.homomorphic_filter(image, 30, 0.5, 2.0)
 
+    def _apply_gaussian_low_pass_correction(self, image):
+        """Apply Gaussian low-pass correction."""
+        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        processor = AdvancedBackgroundProcessor()
+        return processor.gaussian_low_pass(image, 21)
+
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""
         orig_stats = f"Original: {original.min()}-{original.max()}, μ={original.mean():.1f}"
@@ -860,7 +870,8 @@ class MainWindow(tk.Tk):
                 "basic": BackgroundCorrectionMethod.BASIC,
                 "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
                 "restore": BackgroundCorrectionMethod.RESTORE,
-                "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+                "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC,
+                "gaussian_low_pass": BackgroundCorrectionMethod.GAUSSIAN_LOW_PASS
             }
             
             selected_bg_method = self.bg_method_var.get()

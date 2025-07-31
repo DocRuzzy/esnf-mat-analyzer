@@ -210,6 +210,8 @@ class ImageProcessor(IImageProcessor):
         elif method.name == 'HOMOMORPHIC':
             return processor.homomorphic_filter(image, self.config.homomorphic_cutoff, 
                                                self.config.homomorphic_g_low, self.config.homomorphic_g_high)
+        elif method.name == 'GAUSSIAN_LOW_PASS':
+            return processor.gaussian_low_pass(image, self.config.gaussian_sigma)
         else:
             self.logger.warning(f"Unknown background correction method: {method}, using default")
             return self._apply_normalization_correction(image)

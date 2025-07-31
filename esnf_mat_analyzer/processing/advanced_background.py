@@ -280,6 +280,27 @@ class AdvancedBackgroundProcessor:
         return corrected_image.astype(np.uint8)
 
 
+    def gaussian_low_pass(self, image: np.ndarray, sigma: int = 21) -> np.ndarray:
+        """
+        Applies a Gaussian low-pass filter to estimate the background and subtracts it.
+        """
+        # Kernel size is often chosen as a multiple of sigma. 3*sigma is common.
+        kernel_size = int(3 * sigma)
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+
+        # Apply a Gaussian blur to get the low-frequency background
+        background = cv2.GaussianBlur(image, (kernel_size, kernel_size), sigma)
+
+        # Subtract the background from the original image
+        # Use floating point arithmetic for the subtraction
+        corrected_image = image.astype(np.float32) - background.astype(np.float32)
+
+        # Normalize the image to use the full dynamic range
+        corrected_image = cv2.normalize(corrected_image, None, 0, 255, cv2.NORM_MINMAX)
+
+        return corrected_image.astype(np.uint8)
+
     def homomorphic_filter(self, image: np.ndarray, cutoff: float = 30, g_low: float = 0.5, g_high: float = 2.0) -> np.ndarray:
         """
         Homomorphic filtering for multiplicative illumination.
