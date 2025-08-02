@@ -50,6 +50,31 @@ class Visualizer(VisualizerInterface):
         """
         self.logger.debug("Creating thickness heatmap")
         
+        # Downsample large images to prevent memory issues and improve performance
+        max_dimension = 2000
+        height, width = thickness_map.shape
+        if max(height, width) > max_dimension:
+            scale_factor = max_dimension / max(height, width)
+            new_height = int(height * scale_factor)
+            new_width = int(width * scale_factor)
+            
+            # Downsample using scipy if available, otherwise use simple slicing
+            try:
+                from scipy import ndimage
+                thickness_map = ndimage.zoom(thickness_map, scale_factor, order=1)
+                mask = ndimage.zoom(mask.astype(float), scale_factor, order=0) > 0.5
+                if saturation_mask is not None:
+                    saturation_mask = ndimage.zoom(saturation_mask.astype(float), scale_factor, order=0) > 0.5
+                self.logger.debug(f"Downsampled image from {height}x{width} to {thickness_map.shape}")
+            except ImportError:
+                # Fallback to simple downsampling
+                step = int(1 / scale_factor)
+                thickness_map = thickness_map[::step, ::step]
+                mask = mask[::step, ::step]
+                if saturation_mask is not None:
+                    saturation_mask = saturation_mask[::step, ::step]
+                self.logger.debug(f"Simple downsampled image from {height}x{width} to {thickness_map.shape}")
+        
         # Create masked thickness map (only show values within the mask)
         masked_thickness = np.ma.masked_array(thickness_map, mask=~(mask.astype(bool)))
         
@@ -59,15 +84,25 @@ class Visualizer(VisualizerInterface):
         # Use specified colormap
         cmap = plt.get_cmap(self.config.colormap)
         
-        # Create heatmap
+        # Create heatmap with improved gradient preservation
         # Calculate reasonable color limits based on the actual data
         if self.config.auto_range_heatmap:
             valid_data = masked_thickness.compressed()  # Get non-masked values
             if len(valid_data) > 0:
-                # Use configurable percentiles to avoid extreme outliers affecting the color scale
+                # Use conservative percentiles to preserve gradients
                 min_percentile, max_percentile = self.config.heatmap_percentile_range
                 vmin = np.percentile(valid_data, min_percentile)
                 vmax = np.percentile(valid_data, max_percentile)
+                
+                # Ensure we have some dynamic range
+                if vmax - vmin < 0.01 * np.mean(valid_data):
+                    # If range is too small, use standard deviation based range
+                    mean_val = np.mean(valid_data)
+                    std_val = np.std(valid_data)
+                    vmin = max(valid_data.min(), mean_val - 2*std_val)
+                    vmax = min(valid_data.max(), mean_val + 2*std_val)
+                    
+                self.logger.debug(f"Heatmap range: {vmin:.3f} - {vmax:.3f} (preserving gradients)")
             else:
                 vmin, vmax = None, None
         else:

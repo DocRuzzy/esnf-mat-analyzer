@@ -113,11 +113,13 @@ class MainWindow(tk.Tk):
 
         self.bg_method_var = tk.StringVar(value="none")
         bg_methods = [
-            ("Default (Normalization)", "none"),
+            ("No Correction (Preserve Gradients)", "none"),
+            ("Gentle Normalization", "gentle"),
             ("BASIC (Robust)", "basic"),
             ("Rolling Ball", "rolling_ball"),
             ("Percentile BG", "restore"),
-            ("Homomorphic", "homomorphic")
+            ("Homomorphic", "homomorphic"),
+            ("ROI-Aware (Gentle)", "roi_aware")
         ]
 
         for text, value in bg_methods:
@@ -143,7 +145,7 @@ class MainWindow(tk.Tk):
 
         self.thickness_model_var = tk.StringVar(value="beer_lambert")
         thickness_models = [
-            ("Beer-Lambert (Physics)", "beer_lambert"),
+            ("Beer-Lambert (Reflection Physics)", "beer_lambert"),
             ("Linear", "linear"),
             ("Logarithmic", "logarithmic"),
             ("Exponential", "exponential")
@@ -209,6 +211,24 @@ class MainWindow(tk.Tk):
             self.analysis_frame, text="Show Heatmap", command=self.show_heatmap
         )
         self.show_heatmap_button.pack(padx=5, pady=5)
+
+        # Add scale visualization button
+        self.visualize_scales_button = ttk.Button(
+            self.analysis_frame, text="Visualize Wavelet Scales", command=self.visualize_wavelet_scales
+        )
+        self.visualize_scales_button.pack(padx=5, pady=5)
+
+        # Add scale effectiveness test button
+        self.test_scales_button = ttk.Button(
+            self.analysis_frame, text="Test Scale Effectiveness", command=self.analyze_scale_effectiveness
+        )
+        self.test_scales_button.pack(padx=5, pady=5)
+
+        # Add fiber size estimation button
+        self.fiber_size_button = ttk.Button(
+            self.analysis_frame, text="Estimate Fiber Size & Scales", command=self.estimate_fiber_size_pixels
+        )
+        self.fiber_size_button.pack(padx=5, pady=5)
 
         self.export_image_button = ttk.Button(
             self.analysis_frame, text="Export Image", command=self.export_image
@@ -516,7 +536,13 @@ class MainWindow(tk.Tk):
         orig_x2 = max(0, min(orig_x2, img_width))
         orig_y2 = max(0, min(orig_y2, img_height))
         
-        roi = (orig_x1, orig_y1, orig_x2, orig_y2)
+        # Convert corner coordinates to (x, y, width, height) format
+        x = orig_x1
+        y = orig_y1
+        width = orig_x2 - orig_x1
+        height = orig_y2 - orig_y1
+        
+        roi = (x, y, width, height)
         
         print(f"ROI in original coordinates: {roi}")
 
@@ -549,24 +575,326 @@ class MainWindow(tk.Tk):
             print("Please run an analysis first.")
             return
 
-        # Create a visualizer with custom configuration
-        vis_config = VisualizationConfig()
-        vis_config.auto_range_heatmap = self.auto_range_var.get()
-        visualizer = Visualizer(vis_config)
+        try:
+            print("Creating heatmap visualization...")
+            
+            # Create a visualizer with custom configuration
+            vis_config = VisualizationConfig()
+            vis_config.auto_range_heatmap = self.auto_range_var.get()
+            visualizer = Visualizer(vis_config)
 
-        # Create the heatmap figure
-        fig = visualizer.create_thickness_heatmap(
-            self.last_analysis_result.thickness_map,
-            self.last_analysis_result.mask,
-            self.last_analysis_result.saturation_mask
-        )
+            # Create the heatmap figure
+            print("Generating thickness heatmap...")
+            fig = visualizer.create_thickness_heatmap(
+                self.last_analysis_result.thickness_map,
+                self.last_analysis_result.mask,
+                self.last_analysis_result.saturation_mask
+            )
+            print("Heatmap generated successfully.")
 
-        # Display the figure in a new window
-        heatmap_window = tk.Toplevel(self)
-        heatmap_window.title("Thickness Heatmap")
-        canvas = FigureCanvasTkAgg(fig, master=heatmap_window)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # Display the figure in a new window
+            heatmap_window = tk.Toplevel(self)
+            heatmap_window.title("Thickness Heatmap")
+            canvas = FigureCanvasTkAgg(fig, master=heatmap_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            print("Heatmap window opened successfully.")
+            
+        except Exception as e:
+            print(f"Error creating heatmap: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def visualize_wavelet_scales(self):
+        """Visualize what each wavelet scale is detecting."""
+        if not self.last_analysis_result:
+            print("Please run analysis first.")
+            return
+        
+        try:
+            import pywt
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            
+            # Get ROI from the analysis result
+            roi_image = self.last_analysis_result.thickness_map
+            
+            # Perform wavelet decomposition
+            coeffs = pywt.wavedec2(roi_image, 'db4', level=2)
+            
+            # Create visualization window
+            viz_window = tk.Toplevel(self)
+            viz_window.title("Wavelet Scale Analysis")
+            viz_window.geometry("1400x900")
+            
+            # Create figure with subplots
+            fig = Figure(figsize=(16, 10))
+            
+            # Plot original with better contrast
+            ax1 = fig.add_subplot(231)
+            # Use a smaller percentile range to preserve gradients
+            vmin_orig = np.percentile(roi_image, 5)
+            vmax_orig = np.percentile(roi_image, 95)
+            im1 = ax1.imshow(roi_image, cmap='gray', vmin=vmin_orig, vmax=vmax_orig)
+            ax1.set_title('Original ROI\n(Input to Analysis)')
+            ax1.axis('off')
+            fig.colorbar(im1, ax=ax1, fraction=0.046)
+            
+            # Plot approximation (Scale 0) with preserved gradients
+            ax2 = fig.add_subplot(232)
+            vmin_approx = np.percentile(coeffs[0], 5)
+            vmax_approx = np.percentile(coeffs[0], 95)
+            im2 = ax2.imshow(coeffs[0], cmap='gray', vmin=vmin_approx, vmax=vmax_approx)
+            ax2.set_title(f'Scale 0: Large Features\n({coeffs[0].shape[0]}×{coeffs[0].shape[1]} pixels)\nOverall thickness patterns')
+            ax2.axis('off')
+            fig.colorbar(im2, ax=ax2, fraction=0.046)
+            
+            # Plot detail coefficients for each level
+            detail_titles = ['Horizontal Details', 'Vertical Details', 'Diagonal Details']
+            colors = ['hot', 'plasma', 'inferno']
+            scale_descriptions = [
+                'Individual fiber features\n(4-8 pixel structures)',
+                'Small fiber bundles\n(8-16 pixel structures)'
+            ]
+            
+            plot_idx = 3
+            for level in range(min(len(coeffs)-1, 2)):  # Limit to 2 levels
+                for i, (detail, title, cmap) in enumerate(zip(coeffs[level+1], detail_titles, colors)):
+                    if plot_idx <= 6:  # Only plot if we have space
+                        ax = fig.add_subplot(2, 3, plot_idx)
+                        # Use adaptive range for detail coefficients to show subtle features
+                        detail_abs = np.abs(detail)
+                        if detail_abs.max() > 0:
+                            vmax_detail = np.percentile(detail_abs, 85)  # Conservative range
+                            im = ax.imshow(detail_abs, cmap=cmap, vmin=0, vmax=vmax_detail)
+                        else:
+                            im = ax.imshow(detail_abs, cmap=cmap, vmin=0)
+                        
+                        # Create descriptive title
+                        desc = scale_descriptions[level] if level < len(scale_descriptions) else f'Scale {level+1} details'
+                        ax.set_title(f'Scale {level+1}: {title}\n({detail.shape[0]}×{detail.shape[1]} pixels)\n{desc}')
+                        ax.axis('off')
+                        fig.colorbar(im, ax=ax, fraction=0.046)
+                        plot_idx += 1
+            
+            # Add comprehensive statistics as text
+            fig.suptitle('Wavelet Decomposition Analysis - Understanding Your Nanofiber Mat at Different Scales', 
+                        fontsize=14, fontweight='bold')
+            
+            # Embed in window
+            canvas = FigureCanvasTkAgg(fig, viz_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Add detailed statistics frame
+            stats_frame = tk.Frame(viz_window)
+            stats_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            # Calculate detailed statistics
+            approx_std = np.std(coeffs[0])
+            detail_stds = []
+            for level in range(len(coeffs)-1):
+                level_std = np.mean([np.std(d) for d in coeffs[level+1]])
+                detail_stds.append(level_std)
+            
+            # Estimate feature sizes based on image dimensions and scale
+            img_height, img_width = roi_image.shape
+            pixel_sizes = []
+            for level in range(len(coeffs)):
+                if level == 0:
+                    pixel_sizes.append("2-4 pixels")
+                else:
+                    min_size = 2 ** (level + 1)
+                    max_size = 2 ** (level + 2)
+                    pixel_sizes.append(f"{min_size}-{max_size} pixels")
+            
+            stats_text = f"""
+WAVELET SCALE ANALYSIS RESULTS:
+
+Image Information:
+• Original ROI size: {img_width} × {img_height} pixels
+• Total decomposition levels: {len(coeffs)-1}
+
+Scale Breakdown & Feature Detection:
+• Scale 0 (Approximation): {pixel_sizes[0]} features - Standard deviation: {approx_std:.2f}
+  → Captures overall thickness gradients and large-scale uniformity patterns
+  → High variation here indicates non-uniform thickness across the mat
+"""
+            
+            for i, (std_val, pixel_size) in enumerate(zip(detail_stds, pixel_sizes[1:])):
+                feature_type = ""
+                if i == 0:
+                    feature_type = "Individual nanofibers and fine surface texture"
+                elif i == 1:
+                    feature_type = "Small fiber bundles and processing artifacts"
+                else:
+                    feature_type = f"Larger structural features (level {i+1})"
+                
+                stats_text += f"""
+• Scale {i+1} (Details): {pixel_size} features - Average standard deviation: {std_val:.2f}
+  → {feature_type}
+  → {'High' if std_val > 10 else 'Moderate' if std_val > 5 else 'Low'} variation detected at this scale
+"""
+            
+            stats_text += f"""
+
+Interpretation Guide:
+• Higher standard deviation = More variation = Lower uniformity at that scale
+• Scale 0 should dominate for uniform mats (smooth thickness variation)
+• Scale 1-2 capture fiber-level features (most important for nanofiber analysis)
+• If all scales show low variation, background correction may be too aggressive
+
+Physical Scale Estimates (approximate):
+• If your nanofibers are ~500nm diameter and spatial scale is known
+• Scale 1 features ({pixel_sizes[1] if len(pixel_sizes) > 1 else 'N/A'}) should capture individual fiber variations
+• Scale 2 features ({pixel_sizes[2] if len(pixel_sizes) > 2 else 'N/A'}) should capture small bundle formations
+"""
+            
+            stats_label = tk.Label(stats_frame, text=stats_text, justify=tk.LEFT, 
+                                 font=('Courier', 9), bg='lightgray', relief='sunken')
+            stats_label.pack(fill=tk.X, padx=5, pady=5)
+            
+        except ImportError:
+            tk.messagebox.showerror("Error", "PyWavelets not installed. Please install with: pip install PyWavelets")
+        except Exception as e:
+            print(f"Error creating scale visualization: {e}")
+            import traceback
+            traceback.print_exc()
+            tk.messagebox.showerror("Error", f"Failed to create scale visualization: {str(e)}")
+
+    def analyze_scale_effectiveness(self):
+        """Test if wavelet scales are detecting meaningful features."""
+        if not self.last_analysis_result:
+            tk.messagebox.showwarning("Warning", "Please run analysis first.")
+            return
+        
+        try:
+            # Create test images
+            mat_image = self.last_analysis_result.thickness_map
+            height, width = mat_image.shape
+            
+            # 1. Completely uniform image
+            uniform_test = np.ones_like(mat_image) * 128
+            
+            # 2. Random noise image  
+            noise_test = np.random.random(mat_image.shape) * 255
+            
+            # 3. Synthetic fiber pattern (for comparison)
+            x, y = np.meshgrid(np.arange(width), np.arange(height))
+            synthetic_fibers = 128 + 30 * np.sin(x * 0.1) * np.cos(y * 0.1) + np.random.normal(0, 5, mat_image.shape)
+            synthetic_fibers = np.clip(synthetic_fibers, 0, 255).astype(np.uint8)
+            
+            from esnf_mat_analyzer.analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
+            analyzer = MultiScaleUniformityAnalyzer(levels=2, max_coefficients=5000)
+            
+            # Create a simple mask for testing
+            test_mask = np.ones_like(mat_image, dtype=bool)
+            
+            # Test all images
+            uniform_scores = analyzer.analyze_multiscale_uniformity(uniform_test, test_mask)
+            noise_scores = analyzer.analyze_multiscale_uniformity(noise_test, test_mask)
+            synthetic_scores = analyzer.analyze_multiscale_uniformity(synthetic_fibers, test_mask)
+            mat_scores = analyzer.analyze_multiscale_uniformity(mat_image, self.last_analysis_result.mask)
+            
+            # Create results window
+            results_window = tk.Toplevel(self)
+            results_window.title("Scale Effectiveness Test Results")
+            results_window.geometry("900x700")
+            
+            # Create text widget for results
+            text_widget = tk.Text(results_window, wrap=tk.WORD, font=('Courier', 10))
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Format results
+            results_text = "WAVELET SCALE EFFECTIVENESS TEST\n"
+            results_text += "=" * 50 + "\n\n"
+            results_text += "This test evaluates whether the wavelet scales are properly detecting\n"
+            results_text += "different types of features in your nanofiber mat images.\n\n"
+            
+            results_text += "Expected Results:\n"
+            results_text += "• Uniform image → Scores near 1.0 (perfect uniformity)\n"
+            results_text += "• Random noise → Scores near 0.0 (no uniformity)\n"
+            results_text += "• Synthetic fibers → Intermediate scores (structured but not uniform)\n"
+            results_text += "• Your mat → Should fall between synthetic and uniform\n\n"
+            
+            results_text += "ACTUAL RESULTS:\n"
+            results_text += "-" * 30 + "\n\n"
+            
+            def format_scores(scores, name):
+                text = f"{name}:\n"
+                for scale, score in scores.items():
+                    if isinstance(score, (int, float)) and not np.isnan(score):
+                        rating = self._get_uniformity_rating(score)
+                        text += f"  {scale}: {score:.4f} ({rating})\n"
+                    else:
+                        text += f"  {scale}: {score}\n"
+                return text + "\n"
+            
+            results_text += format_scores(uniform_scores, "Uniform Test Image")
+            results_text += format_scores(noise_scores, "Random Noise Image")
+            results_text += format_scores(synthetic_scores, "Synthetic Fiber Pattern")
+            results_text += format_scores(mat_scores, "Your Nanofiber Mat")
+            
+            # Analysis and recommendations
+            results_text += "ANALYSIS & RECOMMENDATIONS:\n"
+            results_text += "-" * 35 + "\n\n"
+            
+            # Check if scales are working properly
+            uniform_avg = np.mean([v for v in uniform_scores.values() if isinstance(v, (int, float)) and not np.isnan(v)])
+            noise_avg = np.mean([v for v in noise_scores.values() if isinstance(v, (int, float)) and not np.isnan(v)])
+            mat_avg = np.mean([v for v in mat_scores.values() if isinstance(v, (int, float)) and not np.isnan(v)])
+            
+            if uniform_avg > 0.8 and noise_avg < 0.3:
+                results_text += "✓ SCALES WORKING CORRECTLY:\n"
+                results_text += "  Scales can distinguish between uniform and random patterns.\n\n"
+            else:
+                results_text += "⚠ POTENTIAL SCALE ISSUES:\n"
+                results_text += "  Scales may not be properly detecting uniformity differences.\n"
+                results_text += "  Consider adjusting wavelet parameters or background correction.\n\n"
+            
+            if mat_avg > 0.9:
+                results_text += "⚠ MAT SCORES TOO HIGH:\n"
+                results_text += "  Your mat shows nearly perfect uniformity (suspiciously high).\n"
+                results_text += "  This suggests background correction may be too aggressive,\n"
+                results_text += "  removing real mat features along with background variations.\n"
+                results_text += "  Try using 'Percentile BG' method instead.\n\n"
+            elif mat_avg < 0.1:
+                results_text += "⚠ MAT SCORES TOO LOW:\n"
+                results_text += "  Your mat shows very poor uniformity.\n"
+                results_text += "  This could indicate real mat quality issues,\n"
+                results_text += "  or insufficient background correction.\n\n"
+            else:
+                results_text += "✓ MAT SCORES REASONABLE:\n"
+                results_text += f"  Average uniformity: {mat_avg:.3f}\n"
+                results_text += "  This suggests the analysis is detecting real mat features.\n\n"
+            
+            # Scale-specific recommendations
+            results_text += "SCALE-SPECIFIC INSIGHTS:\n"
+            for scale_name, score in mat_scores.items():
+                if isinstance(score, (int, float)) and not np.isnan(score):
+                    if 'scale_0' in scale_name:
+                        results_text += f"• Large-scale uniformity: {score:.3f}\n"
+                        results_text += "  (Overall thickness consistency across the mat)\n"
+                    elif 'scale_1' in scale_name:
+                        results_text += f"• Fiber-level uniformity: {score:.3f}\n"
+                        results_text += "  (Individual fiber and surface texture consistency)\n"
+                    elif 'scale_2' in scale_name:
+                        results_text += f"• Bundle-level uniformity: {score:.3f}\n"
+                        results_text += "  (Small fiber bundle and defect consistency)\n"
+            
+            text_widget.insert(tk.END, results_text)
+            text_widget.config(state=tk.DISABLED)
+            
+            # Add close button
+            close_button = ttk.Button(results_window, text="Close", command=results_window.destroy)
+            close_button.pack(pady=10)
+            
+        except Exception as e:
+            print(f"Error in scale effectiveness test: {e}")
+            import traceback
+            traceback.print_exc()
+            tk.messagebox.showerror("Error", f"Scale effectiveness test failed: {str(e)}")
 
     def export_image(self):
         if not self.current_image:
@@ -635,9 +963,12 @@ class MainWindow(tk.Tk):
 
             # Define methods to test with descriptions and links
             methods = [
-                ("Default (Normalization)", "none", self._apply_default_correction, 
-                 "Simple normalization by local background estimation using median filtering.",
-                 "https://en.wikipedia.org/wiki/Background_subtraction"),
+                ("No Correction", "none", self._apply_no_correction, 
+                 "No background correction applied. Preserves all original gradients and fiber details.",
+                 ""),
+                ("Gentle Normalization", "gentle", self._apply_gentle_correction, 
+                 "Very light correction that preserves fine gradients while reducing gross illumination variations.",
+                 ""),
                 ("BASIC (Robust)", "basic", self._apply_basic_correction,
                  "Robust background correction using polynomial fitting and statistical outlier removal.",
                  "https://scikit-image.org/docs/stable/auto_examples/color_exposure/plot_local_equalize.html"),
@@ -730,6 +1061,43 @@ class MainWindow(tk.Tk):
 
         except Exception as e:
             tk.messagebox.showerror("Error", f"Failed to create preview: {str(e)}")
+
+    def _apply_no_correction(self, image):
+        """Apply no correction - return original image."""
+        return image
+
+    def _apply_gentle_correction(self, image):
+        """Apply very gentle normalization."""
+        h, w = image.shape
+        kernel_size = max(101, min(w//3, h//3))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+            
+        # Very gentle background estimation
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size//4, kernel_size//4))
+        background = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+        
+        correction_strength = 0.15
+        image_float = image.astype(np.float32)
+        bg_float = background.astype(np.float32)
+        
+        mean_image = np.mean(image_float)
+        mean_bg = np.mean(bg_float)
+        
+        if abs(mean_bg - mean_image) > 10:
+            correction = (bg_float - mean_bg) * correction_strength
+            corrected = image_float - correction
+        else:
+            corrected = image_float
+        
+        # Preserve original dynamic range
+        orig_min, orig_max = float(image.min()), float(image.max())
+        corrected_min, corrected_max = float(corrected.min()), float(corrected.max())
+        
+        if corrected_max > corrected_min:
+            corrected = ((corrected - corrected_min) / (corrected_max - corrected_min)) * (orig_max - orig_min) + orig_min
+        
+        return np.clip(corrected, 0, 255).astype(np.uint8)
 
     def _apply_default_correction(self, image):
         """Apply default normalization correction."""
@@ -825,7 +1193,7 @@ class MainWindow(tk.Tk):
             tk.messagebox.showerror("Error", f"Model comparison failed: {str(e)}")
 
     def get_roi_coordinates(self):
-        """Get ROI coordinates from canvas rectangle."""
+        """Get ROI coordinates from canvas rectangle in (x, y, width, height) format."""
         if not self.rect:
             return None
             
@@ -846,7 +1214,13 @@ class MainWindow(tk.Tk):
             orig_x2 = max(0, min(orig_x2, img_width))
             orig_y2 = max(0, min(orig_y2, img_height))
         
-        return (orig_x1, orig_y1, orig_x2, orig_y2)
+        # Convert corner coordinates to (x, y, width, height) format
+        x = orig_x1
+        y = orig_y1
+        width = orig_x2 - orig_x1
+        height = orig_y2 - orig_y1
+        
+        return (x, y, width, height)
 
     def analyze(self):
         """Modified analyze method to use selected background correction method and thickness model."""
@@ -907,6 +1281,8 @@ class MainWindow(tk.Tk):
 
             # Run analysis
             print(f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}")
+            print(f"ROI (x, y, width, height): {roi}")
+            
             self.last_analysis_result = analyzer.process_image(
                 Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale
             )
@@ -1079,6 +1455,143 @@ class MainWindow(tk.Tk):
             return "Poor"
         else:
             return "Very Poor"
+
+    def estimate_fiber_size_pixels(self):
+        """Estimate typical fiber diameter in pixels and show scale information."""
+        if not self.spatial_scale:
+            tk.messagebox.showwarning("Warning", "Please set spatial scale first.")
+            return
+        
+        # Create dialog for fiber size estimation
+        estimation_window = tk.Toplevel(self)
+        estimation_window.title("Fiber Size & Scale Information")
+        estimation_window.geometry("600x500")
+        
+        # Main frame
+        main_frame = ttk.Frame(estimation_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="Nanofiber Size Estimation & Scale Analysis", 
+                               font=('Arial', 12, 'bold'))
+        title_label.pack(pady=(0, 10))
+        
+        # Input frame for fiber diameter
+        input_frame = ttk.LabelFrame(main_frame, text="Expected Fiber Properties")
+        input_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Fiber diameter input
+        diameter_frame = ttk.Frame(input_frame)
+        diameter_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(diameter_frame, text="Typical fiber diameter (nm):").pack(side=tk.LEFT)
+        diameter_var = tk.StringVar(value="500")
+        diameter_entry = ttk.Entry(diameter_frame, textvariable=diameter_var, width=10)
+        diameter_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Results text area
+        results_text = tk.Text(main_frame, wrap=tk.WORD, font=('Courier', 10), height=20)
+        results_text.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        
+        def calculate_estimates():
+            try:
+                fiber_diameter_nm = float(diameter_var.get())
+                fiber_diameter_um = fiber_diameter_nm / 1000  # Convert to micrometers
+                fiber_diameter_mm = fiber_diameter_um / 1000  # Convert to mm
+                fiber_diameter_pixels = fiber_diameter_mm * self.spatial_scale
+                
+                # Calculate scale relevance
+                scale_info = f"""
+FIBER SIZE & WAVELET SCALE ANALYSIS
+{'='*50}
+
+Current Spatial Scale: {self.spatial_scale:.2f} pixels/mm
+Expected Fiber Diameter: {fiber_diameter_nm:.0f} nm
+
+CALCULATED FIBER SIZE:
+• {fiber_diameter_pixels:.2f} pixels diameter
+• {1/self.spatial_scale*1000:.2f} μm per pixel resolution
+
+WAVELET SCALE RELEVANCE:
+• Scale 0 (2-4 pixel features): {'✓ RELEVANT' if fiber_diameter_pixels >= 2 else '✗ TOO SMALL'} for fiber detection
+  → Captures features {2/self.spatial_scale*1000:.0f}-{4/self.spatial_scale*1000:.0f} nm
+  
+• Scale 1 (4-8 pixel features): {'✓ OPTIMAL' if 4 <= fiber_diameter_pixels <= 8 else '✓ RELEVANT' if fiber_diameter_pixels >= 4 else '✗ TOO SMALL'} for individual fibers
+  → Captures features {4/self.spatial_scale*1000:.0f}-{8/self.spatial_scale*1000:.0f} nm
+  
+• Scale 2 (8-16 pixel features): {'✓ RELEVANT' if fiber_diameter_pixels <= 16 else '✗ TOO LARGE'} for fiber bundles
+  → Captures features {8/self.spatial_scale*1000:.0f}-{16/self.spatial_scale*1000:.0f} nm
+
+RECOMMENDATIONS:
+"""
+                
+                if fiber_diameter_pixels < 2:
+                    scale_info += """
+⚠ FIBERS TOO SMALL FOR CURRENT SCALES:
+  • Your fibers are smaller than the smallest wavelet scale
+  • Consider using higher magnification images
+  • Scale 1 might not capture individual fiber variations effectively
+"""
+                elif 4 <= fiber_diameter_pixels <= 8:
+                    scale_info += """
+✓ OPTIMAL SCALE SETUP:
+  • Scale 1 should effectively capture individual fiber variations
+  • Scale 2 will capture small bundle formations
+  • Your wavelet analysis should work well for fiber uniformity
+"""
+                elif fiber_diameter_pixels > 16:
+                    scale_info += """
+⚠ FIBERS LARGE RELATIVE TO SCALES:
+  • Consider increasing wavelet decomposition levels
+  • Current scales might miss fiber-level details
+  • Scale 0 might be most relevant for your fiber size
+"""
+                else:
+                    scale_info += """
+✓ REASONABLE SCALE SETUP:
+  • Scales should capture fiber features reasonably well
+  • Some scales may be more relevant than others
+"""
+                
+                # Add interpretation guide
+                scale_info += f"""
+
+EXPECTED UNIFORMITY BEHAVIOR:
+• If your mat has uniform fiber distribution:
+  → Scale 1 should show high uniformity (>0.6)
+  → Scale 2 should show moderate uniformity
+  → Scale 0 should show overall thickness uniformity
+
+• If uniformity scores are all very high (>0.9):
+  → Background correction may be too aggressive
+  → Try 'Percentile BG' method instead
+
+• If uniformity scores are all very low (<0.3):
+  → May indicate real quality issues
+  → Or insufficient background correction
+
+PIXEL-TO-PHYSICAL CONVERSION:
+• 1 pixel = {1/self.spatial_scale*1000:.1f} μm = {1/self.spatial_scale*1000000:.0f} nm
+• Scale 1 features = {4/self.spatial_scale*1000:.0f}-{8/self.spatial_scale*1000:.0f} nm (individual fibers)
+• Scale 2 features = {8/self.spatial_scale*1000:.0f}-{16/self.spatial_scale*1000:.0f} nm (small bundles)
+"""
+                
+                results_text.delete(1.0, tk.END)
+                results_text.insert(tk.END, scale_info)
+                
+            except ValueError:
+                tk.messagebox.showerror("Error", "Please enter a valid fiber diameter.")
+        
+        # Calculate button
+        calc_button = ttk.Button(input_frame, text="Calculate", command=calculate_estimates)
+        calc_button.pack(pady=5)
+        
+        # Initial calculation
+        calculate_estimates()
+        
+        # Close button
+        close_button = ttk.Button(main_frame, text="Close", command=estimation_window.destroy)
+        close_button.pack(pady=(10, 0))
 
 
 def main():

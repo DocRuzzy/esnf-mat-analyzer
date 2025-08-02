@@ -265,9 +265,13 @@ class ImageProcessor(IImageProcessor):
                 background_percentile=getattr(self.config, 'background_percentile', 5.0),
                 gradient_weight=getattr(self.config, 'gradient_weight', 0.5)
             )
+        elif method_name == 'roi_aware':
+            return self._roi_aware_correction(image)
+        elif method_name == 'gentle':
+            return self._gentle_normalization(image)
         else:
-            self.logger.warning(f"Unknown background correction method: {method}, using default")
-            return self._apply_normalization_correction(image)
+            self.logger.warning(f"Unknown background correction method: {method}, using no correction")
+            return image  # Return original image unchanged
             
     def _apply_normalization_correction(self, image: np.ndarray) -> np.ndarray:
         """
@@ -298,3 +302,84 @@ class ImageProcessor(IImageProcessor):
 
         self.logger.debug("Background leveling complete.")
         return leveled_image
+    
+    def _roi_aware_correction(self, image: np.ndarray) -> np.ndarray:
+        """
+        Gentle background correction that preserves mat structure in the ROI.
+        Only corrects obvious illumination gradients without flattening actual features.
+        """
+        h, w = image.shape
+        
+        # Use a very large kernel to only catch broad illumination gradients
+        kernel_size = max(51, min(w//4, h//4))  # Much larger than normal
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+            
+        # Gentle Gaussian blur to estimate illumination pattern
+        background = cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+        
+        # Calculate correction factor but limit it to preserve structure
+        correction_strength = 0.3  # Much weaker than full correction
+        corrected = image.astype(np.float32)
+        bg_float = background.astype(np.float32)
+        
+        # Only correct where there's significant illumination variation
+        mean_bg = np.mean(bg_float)
+        bg_diff = bg_float - mean_bg
+        
+        # Apply gentle correction
+        corrected = corrected - (bg_diff * correction_strength)
+        
+        # Normalize while preserving original dynamic range
+        corrected = np.clip(corrected, 0, 255).astype(np.uint8)
+        
+        self.logger.debug(f"Applied gentle ROI-aware correction with kernel {kernel_size}, strength {correction_strength}.")
+        return corrected
+    
+    def _gentle_normalization(self, image: np.ndarray) -> np.ndarray:
+        """
+        Very gentle normalization that preserves fine gradients and texture.
+        Only corrects for overall brightness variations, not local features.
+        """
+        h, w = image.shape
+        
+        # Use a very large kernel to only catch overall illumination trends
+        kernel_size = max(101, min(w//3, h//3))  # Even larger kernel
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+            
+        # Very gentle background estimation using morphological opening
+        # This preserves fine features while estimating broad illumination
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size//4, kernel_size//4))
+        background = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+        
+        # Apply very weak correction - only adjust for gross illumination differences
+        correction_strength = 0.15  # Very weak
+        
+        # Normalize but preserve the original dynamic range
+        image_float = image.astype(np.float32)
+        bg_float = background.astype(np.float32)
+        
+        # Calculate mean intensities
+        mean_image = np.mean(image_float)
+        mean_bg = np.mean(bg_float)
+        
+        # Only apply correction if there's significant illumination variation
+        if abs(mean_bg - mean_image) > 10:  # Only correct significant differences
+            correction = (bg_float - mean_bg) * correction_strength
+            corrected = image_float - correction
+        else:
+            corrected = image_float  # No correction needed
+        
+        # Preserve original contrast by scaling back to original range
+        orig_min, orig_max = float(image.min()), float(image.max())
+        corrected_min, corrected_max = float(corrected.min()), float(corrected.max())
+        
+        if corrected_max > corrected_min:
+            # Scale to preserve original dynamic range
+            corrected = ((corrected - corrected_min) / (corrected_max - corrected_min)) * (orig_max - orig_min) + orig_min
+        
+        corrected = np.clip(corrected, 0, 255).astype(np.uint8)
+        
+        self.logger.debug(f"Applied gentle normalization with minimal gradient distortion.")
+        return corrected

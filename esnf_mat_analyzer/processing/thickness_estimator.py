@@ -26,9 +26,9 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         # Initialize Beer-Lambert estimator if needed
         if config.model_type == ThicknessModelType.BEER_LAMBERT:
             self.beer_lambert = BeerLambertEstimator(
-                attenuation_coefficient=config.attenuation_coefficient,
-                reference_intensity=config.reference_intensity,
-                min_transmittance=config.min_transmittance,
+                reflection_coefficient=config.attenuation_coefficient,
+                background_intensity=None,  # Auto-detect
+                max_reflection=None,  # Auto-detect
                 max_thickness_um=config.thickness_range_um[1]
             )
 

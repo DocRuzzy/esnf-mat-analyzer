@@ -13,36 +13,42 @@ logger = logging.getLogger(__name__)
 
 class BeerLambertEstimator:
     """
-    Beer-Lambert law implementation for fiber mat thickness estimation.
+    Reflection-based thickness estimation for fiber mat analysis.
     
-    The Beer-Lambert law: I = I₀ × e^(-α×t)
-    Rearranged for thickness: t = -ln(I/I₀) / α
+    **IMPORTANT**: This is NOT traditional Beer-Lambert transmission law!
+    We measure REFLECTED light from fiber surfaces, not transmitted light.
+    
+    Physics model: I = I_background + (I_max - I_background) × (1 - e^(-α×ρ×t))
     
     Where:
-    - I = transmitted intensity (observed pixel value)
-    - I₀ = incident intensity (background reference)
-    - α = attenuation coefficient (material-dependent)
-    - t = optical thickness (fiber density × physical thickness)
+    - I = observed reflected intensity (pixel brightness)
+    - I_background = intensity from bare substrate (dark)
+    - I_max = maximum reflection intensity (fiber saturation)
+    - α = reflection efficiency coefficient 
+    - ρ = fiber density (fibers per unit area)
+    - t = mat thickness
+    
+    Simplified: More fibers → More reflection → Brighter pixels
     """
     
     def __init__(self, 
-                 attenuation_coefficient: float = 0.04778,
-                 reference_intensity: Optional[float] = None,
-                 min_transmittance: float = 0.01,
+                 reflection_coefficient: float = 0.05,
+                 background_intensity: Optional[float] = None,
+                 max_reflection: Optional[float] = None,
                  max_thickness_um: float = 1000.0):
         """
-        Initialize Beer-Lambert estimator.
+        Initialize reflection-based thickness estimator.
         
         Args:
-            attenuation_coefficient: Material attenuation coefficient (1/μm)
-                Default 0.04778 achieves 18.84% average relative error per literature
-            reference_intensity: Background intensity (I₀). If None, auto-detected
-            min_transmittance: Minimum transmittance to prevent log(0) errors
+            reflection_coefficient: Fiber reflection efficiency (1/μm)
+                Higher values = more reflective fibers
+            background_intensity: Substrate/background intensity. If None, auto-detected
+            max_reflection: Maximum reflection intensity. If None, auto-detected  
             max_thickness_um: Maximum reasonable thickness in micrometers
         """
-        self.alpha = attenuation_coefficient
-        self.I0 = reference_intensity
-        self.min_transmittance = min_transmittance
+        self.alpha = reflection_coefficient
+        self.I_bg = background_intensity
+        self.I_max = max_reflection
         self.max_thickness = max_thickness_um
         
     def estimate_thickness(self, 
@@ -50,7 +56,7 @@ class BeerLambertEstimator:
                           background_corrected: bool = True,
                           spatial_scale_um_per_pixel: Optional[float] = None) -> np.ndarray:
         """
-        Estimate thickness using Beer-Lambert law.
+        Estimate thickness using reflection physics model.
         
         Args:
             image: Input grayscale image (0-255)
@@ -63,34 +69,46 @@ class BeerLambertEstimator:
         # Convert to float and normalize to [0,1]
         image_float = image.astype(np.float64) / 255.0
         
-        # Auto-detect background intensity if not provided
-        if self.I0 is None:
-            if background_corrected:
-                # For background-corrected images, use high percentile as reference
-                self.I0 = np.percentile(image_float, 95)
-            else:
-                # For raw images, use background regions
-                self.I0 = self._estimate_background_intensity(image_float)
+        # Auto-detect background and maximum intensities if not provided
+        if self.I_bg is None:
+            # Background should be the DARKEST regions (no fibers)
+            self.I_bg = np.percentile(image_float, 5)  # Dark regions
+            
+        if self.I_max is None:
+            # Maximum should be the BRIGHTEST regions (dense fibers)
+            self.I_max = np.percentile(image_float, 95)  # Bright regions
         
-        # Calculate transmittance T = I/I₀
-        transmittance = image_float / self.I0
+        # Ensure we have a reasonable dynamic range
+        if self.I_max <= self.I_bg:
+            logger.warning("No dynamic range detected in image. Using default values.")
+            self.I_bg = 0.1
+            self.I_max = 0.9
         
-        # Clamp transmittance to prevent numerical issues
-        transmittance = np.clip(transmittance, self.min_transmittance, 1.0)
+        # Normalize intensity relative to background and maximum
+        # I_norm = (I - I_bg) / (I_max - I_bg)
+        I_norm = (image_float - self.I_bg) / (self.I_max - self.I_bg)
+        I_norm = np.clip(I_norm, 0.0, 1.0)
         
-        # Apply Beer-Lambert law: t = -ln(T) / α
-        optical_thickness = -np.log(transmittance) / self.alpha
+        # Apply REFLECTION physics model (INVERSE of Beer-Lambert transmission)
+        # I_norm = 1 - e^(-α×t)  →  t = -ln(1 - I_norm) / α
+        # To prevent ln(0), clamp I_norm to [0, 0.999]
+        I_norm_safe = np.clip(I_norm, 0.0, 0.999)
+        
+        # Calculate optical thickness using reflection model
+        optical_thickness = -np.log(1.0 - I_norm_safe) / self.alpha
         
         # Convert to physical thickness if spatial scale provided
         if spatial_scale_um_per_pixel:
-            # Optical thickness is related to physical thickness by fiber density
-            # For uniform mats, assume linear relationship
+            # Scale by pixel size to get physical thickness
             physical_thickness = optical_thickness * spatial_scale_um_per_pixel
         else:
             physical_thickness = optical_thickness
             
         # Clamp to reasonable range
         thickness_map = np.clip(physical_thickness, 0, self.max_thickness)
+        
+        logger.info(f"Reflection-based thickness estimation complete. "
+                   f"Range: {thickness_map.min():.2f} - {thickness_map.max():.2f}")
         
         return thickness_map.astype(np.float32)
     

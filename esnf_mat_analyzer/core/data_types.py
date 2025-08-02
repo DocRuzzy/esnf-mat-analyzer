@@ -83,7 +83,7 @@ class ThicknessModelType(Enum):
     LINEAR = auto()  # Linear model: thickness = a * brightness + b
     LOGARITHMIC = auto()  # Log model: thickness = a * log(1 + brightness) + b
     EXPONENTIAL = auto()  # Exp model: thickness = a * (exp(brightness / 255) - 1) + b
-    BEER_LAMBERT = auto()  # Beer-Lambert law: I = I₀ * exp(-α * t)
+    BEER_LAMBERT = auto()  # Reflection-based physics: I = I_bg + (I_max - I_bg) * (1 - exp(-α * t))
 
 
 @dataclass
@@ -186,15 +186,15 @@ class ThicknessConfig:
     calibration_factor: Optional[float] = None
     """Optional calibration factor for converting to absolute units (e.g., nm)."""
 
-    # Beer-Lambert specific parameters
-    attenuation_coefficient: float = 0.04778
-    """Attenuation coefficient for Beer-Lambert law (literature-validated value)."""
+    # Reflection-based physics model parameters
+    attenuation_coefficient: float = 0.05
+    """Reflection efficiency coefficient for fiber-light interaction (1/μm)."""
     
     reference_intensity: Optional[float] = None
-    """Background intensity (I₀). If None, auto-detected from image."""
+    """Background intensity (substrate). If None, auto-detected from image."""
     
     min_transmittance: float = 0.01
-    """Minimum transmittance to prevent log(0) errors."""
+    """Minimum normalized intensity to prevent numerical errors."""
     
     thickness_range_um: Tuple[float, float] = (0.0, 1000.0)
     """Valid thickness range in micrometers."""
@@ -203,7 +203,6 @@ class ThicknessConfig:
     """Spatial scale for absolute thickness measurements."""
 
 
-@dataclass
 
 from dataclasses import dataclass, field
 from typing import List
@@ -222,7 +221,7 @@ class UniformityConfig:
     glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
     lbp_radius: int = 1
     lbp_points: int = 8
-    max_coefficients: int = 100000
+    max_coefficients: int = 5000
     """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
 
 
@@ -230,8 +229,8 @@ class UniformityConfig:
 class VisualizationConfig:
     """Configuration parameters for data visualization."""
 
-    colormap: str = "viridis"
-    """Colormap for heatmaps (e.g., 'viridis', 'plasma', 'inferno')."""
+    colormap: str = "plasma"
+    """Colormap for heatmaps (e.g., 'plasma', 'viridis', 'hot'). Plasma: dark=thin, bright=thick."""
 
     dpi: int = 300
     """Output image resolution (DPI)."""
@@ -242,8 +241,8 @@ class VisualizationConfig:
     show_saturated: bool = True
     """Whether to highlight saturated regions in visualizations."""
 
-    heatmap_percentile_range: Tuple[float, float] = (2.0, 98.0)
-    """Percentile range for heatmap color scaling (min_percentile, max_percentile)."""
+    heatmap_percentile_range: Tuple[float, float] = (10.0, 90.0)
+    """Percentile range for heatmap color scaling (min_percentile, max_percentile). Conservative range preserves gradients."""
 
     auto_range_heatmap: bool = True
     """Whether to automatically adjust heatmap color range based on data percentiles."""
@@ -302,25 +301,6 @@ class ExportConfig:
 
     include_metadata: bool = True
     """Whether to include metadata in exports."""
-
-
-@dataclass
-
-@dataclass
-class UniformityConfig:
-    """Configuration parameters for uniformity analysis."""
-    num_radial_lines: int = 36
-    bin_count: int = 50
-    smoothing_factor: float = 0.5
-    min_thickness_percentile: float = 5.0
-    max_thickness_percentile: float = 95.0
-    ignore_saturated: bool = True
-    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
-    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
-    lbp_radius: int = 1
-    lbp_points: int = 8
-    max_coefficients: int = 100000
-    """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
 
 
 @dataclass
@@ -599,3 +579,40 @@ class AnalysisResult:
             warnings.append(f"Small ROI detected: {roi_area} pixels")
             
         return warnings
+
+
+@dataclass
+class Config:
+    """Main configuration container that combines all component configurations."""
+    
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    """Image processing configuration."""
+    
+    leveling: LevelingConfig = field(default_factory=LevelingConfig)
+    """Image leveling configuration."""
+    
+    shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
+    """Shape detection configuration."""
+    
+    thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
+    """Thickness estimation configuration."""
+    
+    uniformity: UniformityConfig = field(default_factory=UniformityConfig)
+    """Uniformity analysis configuration."""
+    
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
+    """Visualization configuration."""
+    
+    ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
+    """Ruler detection configuration."""
+    
+    export: ExportConfig = field(default_factory=ExportConfig)
+    """Export configuration."""
+    
+    output_dir: Path = field(default_factory=lambda: Path("results"))
+    """Output directory for analysis results."""
+    
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        # Ensure output directory exists
+        self.output_dir.mkdir(parents=True, exist_ok=True)

@@ -29,7 +29,7 @@ class MultiScaleUniformityAnalyzer:
         # Results: {'scale_0_uniformity': 0.85, 'scale_1_uniformity': 0.92, ...}
     """
 
-    def __init__(self, wavelet: str = 'db4', levels: int = 4, max_coefficients: int = 100000):
+    def __init__(self, wavelet: str = 'db4', levels: int = 2, max_coefficients: int = 5000):
         self.wavelet = wavelet
         self.levels = levels
         self.max_coefficients = max_coefficients
