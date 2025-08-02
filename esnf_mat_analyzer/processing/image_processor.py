@@ -215,16 +215,18 @@ class ImageProcessor(IImageProcessor):
     def _apply_leveling(self, image: np.ndarray) -> np.ndarray:
         """
         Applies background correction to handle non-uniform illumination.
-        Supports advanced mat-level methods as recommended in the integration guide.
+        This uses the recommended mat-level methods.
         """
         if not self.config.leveling.enabled:
             return image
 
-        method = getattr(self.config, 'background_correction_method', None)
+        method = getattr(self.config, 'background_correction_method', 'polynomial_surface')
         # Accept both string and enum
-        method_name = getattr(method, 'name', str(method).lower() if method else 'none').lower()
+        method_name = getattr(method, 'name', str(method).lower() if method else 'polynomial_surface').lower()
 
-        # Mat-level background correction methods
+        self.logger.debug(f"Applying background correction method: {method_name}")
+
+        # Recommended mat-level background correction methods
         if method_name in ['polynomial_surface', 'polynomial']:
             return self.mat_bg_processor.adaptive_polynomial_surface_fitting(
                 image,
@@ -241,24 +243,6 @@ class ImageProcessor(IImageProcessor):
                 preserve_threshold=getattr(self.config, 'preserve_threshold', 0.7),
                 blur_size=getattr(self.config, 'blur_size', 101)
             )
-        # Fallback to legacy/other methods
-        elif method_name == 'basic':
-            from ..processing.advanced_background import AdvancedBackgroundProcessor
-            processor = AdvancedBackgroundProcessor()
-            return processor.basic_correction(image, self.config.basic_correction_n_components)
-        elif method_name == 'rolling_ball':
-            from ..processing.advanced_background import AdvancedBackgroundProcessor
-            processor = AdvancedBackgroundProcessor()
-            return processor.rolling_ball_3d(image, self.config.rolling_ball_radius)
-        elif method_name == 'restore':
-            from ..processing.advanced_background import AdvancedBackgroundProcessor
-            processor = AdvancedBackgroundProcessor()
-            return processor.restore_method(image, self.config.restore_percentile)
-        elif method_name == 'homomorphic':
-            from ..processing.advanced_background import AdvancedBackgroundProcessor
-            processor = AdvancedBackgroundProcessor()
-            return processor.homomorphic_filter(image, self.config.homomorphic_cutoff, 
-                                               self.config.homomorphic_g_low, self.config.homomorphic_g_high)
         elif method_name == 'enhanced_percentile':
             return self.mat_bg_processor.enhanced_percentile_with_gradient_preservation(
                 image,
@@ -266,8 +250,15 @@ class ImageProcessor(IImageProcessor):
                 gradient_weight=getattr(self.config, 'gradient_weight', 0.5)
             )
         else:
-            self.logger.warning(f"Unknown background correction method: {method}, using default")
-            return self._apply_normalization_correction(image)
+            self.logger.warning(
+                f"Unknown background correction method: '{method_name}'. "
+                f"Defaulting to 'polynomial_surface'."
+            )
+            return self.mat_bg_processor.adaptive_polynomial_surface_fitting(
+                image,
+                polynomial_order=getattr(self.config, 'polynomial_order', 3),
+                sample_density=getattr(self.config, 'sample_density', 0.05)
+            )
             
     def _apply_normalization_correction(self, image: np.ndarray) -> np.ndarray:
         """

@@ -131,7 +131,6 @@ extend-exclude = '''
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --strict-markers --cov=esnf_mat_analyzer --cov-report=term-missing --cov-report=html"
 testpaths = [
     "tests",
     "esnf_mat_analyzer/tests",

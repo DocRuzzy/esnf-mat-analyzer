@@ -9,6 +9,7 @@ export:
 log_level: INFO
 output_dir: output
 processing:
+  background_correction_method: polynomial_surface
   blur_kernel_size: 5
   contrast_alpha: 1.5
   contrast_beta: 0

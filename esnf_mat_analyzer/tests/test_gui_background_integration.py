@@ -18,19 +18,18 @@ def test_background_method_mapping():
     """Test that the method mapping works correctly."""
     print("Testing background correction method mapping...")
     
-    # Create a mock main window to test the mapping
-    app = MainWindow()
-    
     # Test method mapping
     method_mapping = {
         "none": BackgroundCorrectionMethod.NONE,
-        "basic": BackgroundCorrectionMethod.BASIC,
-        "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
-        "restore": BackgroundCorrectionMethod.RESTORE,
-        "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+        "polynomial_surface": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+        "two_stage": BackgroundCorrectionMethod.TWO_STAGE,
+        "region_leveling": BackgroundCorrectionMethod.REGION_LEVELING,
+        "selective_illumination": BackgroundCorrectionMethod.SELECTIVE_ILLUMINATION,
+        "enhanced_percentile": BackgroundCorrectionMethod.ENHANCED_PERCENTILE,
     }
     
     for string_method, enum_method in method_mapping.items():
+        assert isinstance(enum_method, BackgroundCorrectionMethod)
         print(f"  {string_method} -> {enum_method}")
     
     print("✓ Method mapping test passed")

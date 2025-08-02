@@ -111,13 +111,14 @@ class MainWindow(tk.Tk):
         self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction")
         self.bg_method_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.bg_method_var = tk.StringVar(value="none")
+        self.bg_method_var = tk.StringVar(value="polynomial_surface")
         bg_methods = [
-            ("Default (Normalization)", "none"),
-            ("BASIC (Robust)", "basic"),
-            ("Rolling Ball", "rolling_ball"),
-            ("Percentile BG", "restore"),
-            ("Homomorphic", "homomorphic")
+            ("Polynomial Surface", "polynomial_surface"),
+            ("Two-Stage Correction", "two_stage"),
+            ("Region-Based Leveling", "region_leveling"),
+            ("Selective Illumination", "selective_illumination"),
+            ("Enhanced Percentile", "enhanced_percentile"),
+            ("None", "none")
         ]
 
         for text, value in bg_methods:
@@ -629,68 +630,21 @@ class MainWindow(tk.Tk):
         # Load and preprocess the image
         try:
             import cv2
+            from esnf_mat_analyzer.processing.mat_level_background_correction import MatLevelBackgroundProcessor
+            processor = MatLevelBackgroundProcessor()
+
             raw_image = cv2.imread(str(self.current_image_path))
-            raw_image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
-            gray_image = cv2.cvtColor(raw_image_rgb, cv2.COLOR_RGB2GRAY)
+            gray_image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2GRAY)
 
-            # Define methods to test with descriptions and links
-            methods = [
-                ("Default (Normalization)", "none", self._apply_default_correction, 
-                 "Simple normalization by local background estimation using median filtering.",
-                 "https://en.wikipedia.org/wiki/Background_subtraction"),
-                ("BASIC (Robust)", "basic", self._apply_basic_correction,
-                 "Robust background correction using polynomial fitting and statistical outlier removal.",
-                 "https://scikit-image.org/docs/stable/auto_examples/color_exposure/plot_local_equalize.html"),
-                ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction,
-                 "ImageJ-style rolling ball algorithm that estimates background by rolling a sphere under the image surface.",
-                 "https://imagej.net/plugins/rolling-ball-background-subtraction"),
-                ("Percentile BG", "restore", self._apply_restore_correction,
-                 "Automatic negative control region identification. Uses the darkest regions (lowest percentile) as background reference for subtraction.",
-                 "https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_thresholding.html"),
-                ("Homomorphic", "homomorphic", self._apply_homomorphic_correction,
-                 "Frequency domain filtering that separates illumination from reflectance components.",
-                 "https://en.wikipedia.org/wiki/Homomorphic_filtering")
-            ]
+            methods = processor.compare_methods_for_mat_preservation(gray_image)
 
-            for method_name, method_id, method_func, description, learn_more_url in methods:
+            for method_name, corrected_image in methods.items():
                 # Create tab for this method
                 tab_frame = ttk.Frame(notebook)
                 notebook.add(tab_frame, text=method_name)
 
-                # Create a frame for the description and link at the top
-                info_frame = ttk.Frame(tab_frame)
-                info_frame.pack(fill=tk.X, padx=10, pady=5)
-                
-                # Add description
-                desc_label = ttk.Label(info_frame, text=description, wraplength=400, justify=tk.LEFT)
-                desc_label.pack(anchor=tk.W)
-                
-                # Add clickable link
-                link_label = ttk.Label(info_frame, text="📖 Learn more about this method", 
-                                     foreground="blue", cursor="hand2")
-                link_label.pack(anchor=tk.W, pady=(2, 0))
-                
-                # Make the link clickable
-                def open_link(url=learn_more_url):
-                    import webbrowser
-                    webbrowser.open(url)
-                
-                link_label.bind("<Button-1>", lambda e, url=learn_more_url: open_link(url))
-                
-                # Add hover effect
-                def on_enter(e, label=link_label):
-                    label.configure(foreground="darkblue")
-                
-                def on_leave(e, label=link_label):
-                    label.configure(foreground="blue")
-                
-                link_label.bind("<Enter>", on_enter)
-                link_label.bind("<Leave>", on_leave)
-
                 # Apply the background correction method
                 try:
-                    corrected_image = method_func(gray_image)
-                    
                     # Create side-by-side comparison
                     fig = Figure(figsize=(12, 5))
                     
@@ -716,6 +670,10 @@ class MainWindow(tk.Tk):
                     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                     
                     # Add selection button
+                    method_id = method_name.lower().replace(' ', '_').replace('(', '').replace(')', '')
+                    if "polynomial" in method_id:
+                        method_id = "polynomial_surface"
+
                     select_button = ttk.Button(
                         tab_frame,
                         text=f"Use {method_name}",
@@ -730,40 +688,6 @@ class MainWindow(tk.Tk):
 
         except Exception as e:
             tk.messagebox.showerror("Error", f"Failed to create preview: {str(e)}")
-
-    def _apply_default_correction(self, image):
-        """Apply default normalization correction."""
-        kernel_size = 25
-        background = cv2.medianBlur(image, kernel_size)
-        image_float = image.astype(np.float32)
-        background_float = background.astype(np.float32)
-        epsilon = 1.0
-        corrected = (image_float / (background_float + epsilon)) * 128.0
-        return np.clip(corrected, 0, 255).astype(np.uint8)
-
-    def _apply_basic_correction(self, image):
-        """Apply BASIC correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
-        processor = AdvancedBackgroundProcessor()
-        return processor.basic_correction(image, 1)
-
-    def _apply_rolling_ball_correction(self, image):
-        """Apply rolling ball correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
-        processor = AdvancedBackgroundProcessor()
-        return processor.rolling_ball_3d(image, 50)
-
-    def _apply_restore_correction(self, image):
-        """Apply Percentile BG correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
-        processor = AdvancedBackgroundProcessor()
-        return processor.restore_method(image, 5.0)
-
-    def _apply_homomorphic_correction(self, image):
-        """Apply homomorphic correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
-        processor = AdvancedBackgroundProcessor()
-        return processor.homomorphic_filter(image, 30, 0.5, 2.0)
 
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""
@@ -867,15 +791,16 @@ class MainWindow(tk.Tk):
             # Background correction method
             method_mapping = {
                 "none": BackgroundCorrectionMethod.NONE,
-                "basic": BackgroundCorrectionMethod.BASIC,
-                "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
-                "restore": BackgroundCorrectionMethod.RESTORE,
-                "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+                "polynomial_surface": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+                "two_stage": BackgroundCorrectionMethod.TWO_STAGE,
+                "region_leveling": BackgroundCorrectionMethod.REGION_LEVELING,
+                "selective_illumination": BackgroundCorrectionMethod.SELECTIVE_ILLUMINATION,
+                "enhanced_percentile": BackgroundCorrectionMethod.ENHANCED_PERCENTILE,
             }
             
             selected_bg_method = self.bg_method_var.get()
             config.processing.background_correction_method = method_mapping.get(
-                selected_bg_method, BackgroundCorrectionMethod.NONE
+                selected_bg_method, BackgroundCorrectionMethod.POLYNOMIAL_SURFACE
             )
             
             # Thickness model selection

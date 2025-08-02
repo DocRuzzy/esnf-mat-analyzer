@@ -55,18 +55,22 @@ class BackgroundCorrectionMethod(Enum):
     """
     Methods for background correction in nanofiber mat images.
     
-    Different approaches for handling uneven illumination and background artifacts:
-    - NONE: No background correction applied
-    - BASIC: Simple statistical background estimation
-    - ROLLING_BALL: Morphological rolling ball background subtraction
-    - RESTORE: Restoration-based background correction
-    - HOMOMORPHIC: Frequency domain homomorphic filtering
+    These methods are designed to preserve continuous mat regions while removing
+    non-uniform background illumination, as recommended in the project documentation.
+
+    - NONE: No background correction applied.
+    - POLYNOMIAL_SURFACE: Fits a polynomial surface to background regions and subtracts it. (Primary Recommendation)
+    - TWO_STAGE: Combines global polynomial correction with local refinement.
+    - REGION_LEVELING: Grid-based leveling that preserves local contrast.
+    - SELECTIVE_ILLUMINATION: Corrects illumination while preserving bright mat regions.
+    - ENHANCED_PERCENTILE: Percentile-based correction with gradient preservation.
     """
     NONE = auto()
-    BASIC = auto()
-    ROLLING_BALL = auto()
-    RESTORE = auto()
-    HOMOMORPHIC = auto()
+    POLYNOMIAL_SURFACE = auto()
+    TWO_STAGE = auto()
+    REGION_LEVELING = auto()
+    SELECTIVE_ILLUMINATION = auto()
+    ENHANCED_PERCENTILE = auto()
 
 
 class ThicknessModelType(Enum):
@@ -205,9 +209,6 @@ class ThicknessConfig:
 
 @dataclass
 
-from dataclasses import dataclass, field
-from typing import List
-
 @dataclass
 class UniformityConfig:
     """Configuration parameters for uniformity analysis."""
@@ -218,8 +219,6 @@ class UniformityConfig:
     min_thickness_percentile: float = 5.0
     max_thickness_percentile: float = 95.0
     ignore_saturated: bool = True
-    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
-    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
     lbp_radius: int = 1
     lbp_points: int = 8
     max_coefficients: int = 100000
@@ -305,22 +304,17 @@ class ExportConfig:
 
 
 @dataclass
-
-@dataclass
-class UniformityConfig:
-    """Configuration parameters for uniformity analysis."""
-    num_radial_lines: int = 36
-    bin_count: int = 50
-    smoothing_factor: float = 0.5
-    min_thickness_percentile: float = 5.0
-    max_thickness_percentile: float = 95.0
-    ignore_saturated: bool = True
-    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
-    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
-    lbp_radius: int = 1
-    lbp_points: int = 8
-    max_coefficients: int = 100000
-    """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
+class Config:
+    """Main configuration container."""
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
+    thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
+    uniformity: UniformityConfig = field(default_factory=UniformityConfig)
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
+    ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
+    export: ExportConfig = field(default_factory=ExportConfig)
+    output_dir: str = "output"
+    log_level: str = "INFO"
 
 
 @dataclass

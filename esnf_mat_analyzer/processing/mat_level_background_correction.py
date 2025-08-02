@@ -1,6 +1,3 @@
-# This file was renamed from mat-level-background-correction.py to mat_level_background_correction.py for Python import compatibility.
-# The content is copied from the original file.
-
 import numpy as np
 import cv2
 from typing import Optional, Tuple, Dict
@@ -161,7 +158,46 @@ class MatLevelBackgroundProcessor:
                 
                 # Extract cell
                 cell = img_float[y:y_end, x:x_end]
-                # ... (rest of the function remains unchanged)
+                cell_mask = mat_mask[y:y_end, x:x_end]
+
+                # Calculate background reference in this cell
+                if np.any(~cell_mask):  # If there's background in this cell
+                    bg_values = cell[~cell_mask]
+                    reference_value = np.percentile(bg_values, reference_percentile)
+                else:
+                    # No background in cell, use neighboring cells
+                    reference_value = self._get_neighbor_reference(
+                        img_float, mat_mask, x, y, grid_size, reference_percentile)
+
+                # Store reference value
+                correction_map[y:y_end, x:x_end] = reference_value
+
+        # Smooth the correction map
+        correction_map = cv2.GaussianBlur(correction_map, (31, 31), 0)
+
+        # Calculate global reference
+        global_reference = np.percentile(img_float[~mat_mask], reference_percentile) \
+                          if np.any(~mat_mask) else np.mean(img_float)
+
+        # Apply correction
+        corrected = img_float - correction_map + global_reference
+
+        # Preserve mat brightness relationships
+        if np.any(mat_mask):
+            # Scale mat values to maintain contrast
+            mat_values_original = img_float[mat_mask]
+            mat_values_corrected = corrected[mat_mask]
+
+            if len(mat_values_original) > 0 and np.std(mat_values_original) > 0:
+                # Maintain contrast ratio
+                scale = np.std(mat_values_original) / (np.std(mat_values_corrected) + 1e-6)
+                offset = np.mean(mat_values_original) - scale * np.mean(mat_values_corrected)
+                corrected[mat_mask] = scale * corrected[mat_mask] + offset
+
+        # Clip to valid range
+        corrected = np.clip(corrected, 0, 255)
+
+        return corrected.astype(np.uint8)
 
     def selective_illumination_correction(self,
                                         image: np.ndarray,
@@ -221,8 +257,44 @@ class MatLevelBackgroundProcessor:
                                                      image: np.ndarray,
                                                      background_percentile: float = 5.0,
                                                      gradient_weight: float = 0.5) -> np.ndarray:
-        # ... (rest of the function remains unchanged)
-        pass
+        """
+        Enhanced percentile correction that preserves intensity gradients within mat.
+
+        Args:
+            image: Input grayscale image
+            background_percentile: Percentile for background estimation
+            gradient_weight: Weight for gradient preservation (0-1)
+
+        Returns:
+            Corrected image with preserved gradients
+        """
+        img_float = image.astype(np.float32)
+
+        # Estimate background value
+        background_value = np.percentile(img_float, background_percentile)
+
+        # Simple correction
+        simple_corrected = img_float - background_value
+
+        # Calculate gradients in original image
+        grad_x = cv2.Sobel(img_float, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(img_float, cv2.CV_64F, 0, 1, ksize=3)
+
+        # Reconstruct from gradients (Poisson reconstruction simplified)
+        # This preserves relative intensities
+        grad_corrected = self._simple_poisson_reconstruction(
+            grad_x, grad_y, boundary=simple_corrected)
+
+        # Blend based on gradient weight
+        corrected = (1 - gradient_weight) * simple_corrected + gradient_weight * grad_corrected
+
+        # Add offset to maintain positive values
+        corrected = corrected + np.abs(np.min(corrected)) + 10
+
+        # Normalize to use full range
+        corrected = 255 * (corrected - np.min(corrected)) / (np.max(corrected) - np.min(corrected))
+
+        return corrected.astype(np.uint8)
 
     def two_stage_correction(self,
                            image: np.ndarray,
@@ -262,4 +334,65 @@ class MatLevelBackgroundProcessor:
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
         
         return cleaned > 0
-    # ... (rest of the class remains unchanged)
+
+    def _get_neighbor_reference(self, image, mask, x, y, grid_size, percentile):
+        """Get reference value from neighboring cells."""
+        h, w = image.shape
+        references = []
+
+        # Check 8 neighboring cells
+        for dy in [-grid_size, 0, grid_size]:
+            for dx in [-grid_size, 0, grid_size]:
+                if dx == 0 and dy == 0:
+                    continue
+
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h:
+                    nx_end = min(nx + grid_size, w)
+                    ny_end = min(ny + grid_size, h)
+
+                    cell = image[ny:ny_end, nx:nx_end]
+                    cell_mask = mask[ny:ny_end, nx:nx_end]
+
+                    if np.any(~cell_mask):
+                        bg_values = cell[~cell_mask]
+                        references.append(np.percentile(bg_values, percentile))
+
+        return np.median(references) if references else np.mean(image)
+
+    def _simple_poisson_reconstruction(self, grad_x, grad_y, boundary):
+        """Simplified Poisson reconstruction from gradients."""
+        h, w = grad_x.shape
+
+        # Use iterative approach (simplified)
+        result = boundary.copy()
+
+        for _ in range(10):  # Fixed iterations for simplicity
+            # Update interior points based on gradients
+            result[1:-1, 1:-1] = 0.25 * (
+                result[:-2, 1:-1] + result[2:, 1:-1] +
+                result[1:-1, :-2] + result[1:-1, 2:] +
+                grad_x[1:-1, 1:-1] - grad_x[1:-1, :-2] +
+                grad_y[1:-1, 1:-1] - grad_y[:-2, 1:-1]
+            )
+
+        return result
+
+    def compare_methods_for_mat_preservation(self, image: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Compare all methods specifically for mat preservation quality.
+
+        Returns:
+            Dictionary of method names to corrected images
+        """
+        results = {
+            'Original': image,
+            'Polynomial Surface (Order 2)': self.adaptive_polynomial_surface_fitting(image, polynomial_order=2),
+            'Polynomial Surface (Order 3)': self.adaptive_polynomial_surface_fitting(image, polynomial_order=3),
+            'Region-Based Leveling': self.region_based_leveling(image),
+            'Selective Illumination': self.selective_illumination_correction(image),
+            'Enhanced Percentile': self.enhanced_percentile_with_gradient_preservation(image),
+            'Two-Stage Correction': self.two_stage_correction(image)
+        }
+
+        return results
