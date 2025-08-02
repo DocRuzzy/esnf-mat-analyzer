@@ -53,24 +53,25 @@ class GrayscaleConversionMethod(Enum):
 
 class BackgroundCorrectionMethod(Enum):
     """
-    Methods for background correction in nanofiber mat images.
+    Methods for Step 2 of the scientific background correction workflow.
     
-    These methods are designed to preserve continuous mat regions while removing
-    non-uniform background illumination, as recommended in the project documentation.
+    This enum represents the choice of illumination modeling method within
+    the complete 4-step process described in the guide:
+    
+    Step 1: Isolate Background Pixels (automatic)
+    Step 2: Model Uneven Illumination (choice of method below)  
+    Step 3: Correct Image (automatic division)
+    Step 4: Analyze Mat Uniformity (automatic)
 
-    - NONE: No background correction applied.
-    - POLYNOMIAL_SURFACE: Fits a polynomial surface to background regions and subtracts it. (Primary Recommendation)
-    - TWO_STAGE: Combines global polynomial correction with local refinement.
-    - REGION_LEVELING: Grid-based leveling that preserves local contrast.
-    - SELECTIVE_ILLUMINATION: Corrects illumination while preserving bright mat regions.
-    - ENHANCED_PERCENTILE: Percentile-based correction with gradient preservation.
+    - NONE: Skip background correction entirely
+    - POLYNOMIAL_SURFACE: 2D polynomial surface fitting (Method A - Most Robust)
+    - LARGE_KERNEL_BLUR: Large-kernel blurring (Method B - Simpler Alternative)
+    - COMPLETE_WORKFLOW: Use the full 4-step process with polynomial fitting
     """
     NONE = auto()
     POLYNOMIAL_SURFACE = auto()
-    TWO_STAGE = auto()
-    REGION_LEVELING = auto()
-    SELECTIVE_ILLUMINATION = auto()
-    ENHANCED_PERCENTILE = auto()
+    LARGE_KERNEL_BLUR = auto()
+    COMPLETE_WORKFLOW = auto()
 
 
 class ThicknessModelType(Enum):

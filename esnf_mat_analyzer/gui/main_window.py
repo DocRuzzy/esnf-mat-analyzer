@@ -108,17 +108,22 @@ class MainWindow(tk.Tk):
         self.max_coeff_spinbox.pack(side=tk.LEFT, padx=2)
 
         # Background correction method selection
-        self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction")
+        self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction Method")
         self.bg_method_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.bg_method_var = tk.StringVar(value="polynomial_surface")
+        # Add explanation label
+        explanation_label = ttk.Label(
+            self.bg_method_frame, 
+            text="Always uses 4-step workflow. Choose illumination modeling method:",
+            font=('TkDefaultFont', 8)
+        )
+        explanation_label.pack(anchor=tk.W, padx=5, pady=2)
+
+        self.bg_method_var = tk.StringVar(value="polynomial")
         bg_methods = [
-            ("Polynomial Surface", "polynomial_surface"),
-            ("Two-Stage Correction", "two_stage"),
-            ("Region-Based Leveling", "region_leveling"),
-            ("Selective Illumination", "selective_illumination"),
-            ("Enhanced Percentile", "enhanced_percentile"),
-            ("None", "none")
+            ("Method 2A: Polynomial Surface (Most Robust)", "polynomial"),
+            ("Method 2B: Large Kernel Blur (Simpler)", "large_kernel_blur"),
+            ("None (Skip Background Correction)", "none")
         ]
 
         for text, value in bg_methods:
@@ -133,7 +138,7 @@ class MainWindow(tk.Tk):
         # Preview button for background methods
         self.preview_bg_button = ttk.Button(
             self.bg_method_frame,
-            text="Preview Methods",
+            text="Compare Methods 2A vs 2B",
             command=self.preview_background_methods
         )
         self.preview_bg_button.pack(padx=5, pady=5)
@@ -613,15 +618,15 @@ class MainWindow(tk.Tk):
         pass
 
     def preview_background_methods(self):
-        """Show a comparison of different background correction methods."""
+        """Show a comparison of Method 2A (Polynomial) vs Method 2B (Large Kernel Blur)."""
         if not self.current_image or not self.current_image_path:
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
         # Create preview window
         preview_window = tk.Toplevel(self)
-        preview_window.title("Background Correction Methods Comparison")
-        preview_window.geometry("1400x800")
+        preview_window.title("4-Step Workflow: Method 2A vs 2B Comparison")
+        preview_window.geometry("1600x900")
 
         # Create notebook for tabs
         notebook = ttk.Notebook(preview_window)
@@ -630,38 +635,81 @@ class MainWindow(tk.Tk):
         # Load and preprocess the image
         try:
             import cv2
-            from esnf_mat_analyzer.processing.mat_level_background_correction import MatLevelBackgroundProcessor
-            processor = MatLevelBackgroundProcessor()
+            from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+            processor = AdvancedBackgroundProcessor()
 
             raw_image = cv2.imread(str(self.current_image_path))
             gray_image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2GRAY)
 
-            methods = processor.compare_methods_for_mat_preservation(gray_image)
+            # Compare only the two Step 2 methods within the complete workflow
+            methods = {
+                "Method 2A: Polynomial Surface": processor.complete_uniformity_analysis(
+                    gray_image, background_method="polynomial"
+                ),
+                "Method 2B: Large Kernel Blur": processor.complete_uniformity_analysis(
+                    gray_image, background_method="large_kernel_blur"
+                )
+            }
 
-            for method_name, corrected_image in methods.items():
+            for method_name, results in methods.items():
                 # Create tab for this method
                 tab_frame = ttk.Frame(notebook)
                 notebook.add(tab_frame, text=method_name)
 
                 # Apply the background correction method
                 try:
-                    # Create side-by-side comparison
-                    fig = Figure(figsize=(12, 5))
+                    corrected_image = results['corrected_image']
+                    
+                    # Create side-by-side comparison with workflow steps
+                    fig = Figure(figsize=(16, 8))
                     
                     # Original image
-                    ax1 = fig.add_subplot(121)
+                    ax1 = fig.add_subplot(241)
                     ax1.imshow(gray_image, cmap='gray')
-                    ax1.set_title('Original Image')
+                    ax1.set_title('1. Original Image')
                     ax1.axis('off')
                     
-                    # Corrected image
-                    ax2 = fig.add_subplot(122)
-                    ax2.imshow(corrected_image, cmap='viridis')
-                    ax2.set_title(f'{method_name} Corrected')
+                    # Background mask
+                    ax2 = fig.add_subplot(242)
+                    ax2.imshow(results['background_mask'], cmap='gray')
+                    ax2.set_title('1. Background Mask')
                     ax2.axis('off')
                     
-                    # Add statistics
-                    stats_text = self._get_correction_stats(gray_image, corrected_image)
+                    # Estimated background
+                    ax3 = fig.add_subplot(243)
+                    ax3.imshow(results['estimated_background'], cmap='viridis')
+                    ax3.set_title('2. Estimated Background')
+                    ax3.axis('off')
+                    
+                    # Corrected image
+                    ax4 = fig.add_subplot(244)
+                    ax4.imshow(corrected_image, cmap='gray')
+                    ax4.set_title('3. Corrected Image')
+                    ax4.axis('off')
+                    
+                    # Add uniformity analysis in bottom row
+                    if 'mat_mask' in results and np.any(results['mat_mask']):
+                        # Mat mask
+                        ax5 = fig.add_subplot(245)
+                        ax5.imshow(results['mat_mask'], cmap='gray')
+                        ax5.set_title('4. Mat Mask')
+                        ax5.axis('off')
+                        
+                        # Histogram comparison
+                        ax6 = fig.add_subplot(246)
+                        original_mat = gray_image[results['mat_mask']]
+                        corrected_mat = corrected_image[results['mat_mask']]
+                        ax6.hist(original_mat, bins=50, alpha=0.5, label='Original', density=True)
+                        ax6.hist(corrected_mat, bins=50, alpha=0.5, label='Corrected', density=True)
+                        ax6.set_title('4. Mat Intensity Distribution')
+                        ax6.legend()
+                        ax6.set_xlabel('Intensity')
+                        ax6.set_ylabel('Density')
+                    
+                    # Add statistics text
+                    stats_text = self._get_complete_workflow_stats(results)
+                    fig.text(0.7, 0.3, stats_text, fontsize=10, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
                     fig.suptitle(f'{method_name}\n{stats_text}', fontsize=10)
                     
                     # Embed plot in tab
@@ -670,14 +718,17 @@ class MainWindow(tk.Tk):
                     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                     
                     # Add selection button
-                    method_id = method_name.lower().replace(' ', '_').replace('(', '').replace(')', '')
-                    if "polynomial" in method_id:
-                        method_id = "polynomial_surface"
+                    if "Polynomial" in method_name:
+                        button_method = "polynomial"
+                        button_text = "Use Method 2A (Polynomial)"
+                    else:
+                        button_method = "large_kernel_blur"
+                        button_text = "Use Method 2B (Large Kernel Blur)"
 
                     select_button = ttk.Button(
                         tab_frame,
-                        text=f"Use {method_name}",
-                        command=lambda m=method_id: self._select_bg_method(m, preview_window)
+                        text=button_text,
+                        command=lambda m=button_method: self._select_bg_method(m, preview_window)
                     )
                     select_button.pack(pady=10)
 
@@ -688,6 +739,31 @@ class MainWindow(tk.Tk):
 
         except Exception as e:
             tk.messagebox.showerror("Error", f"Failed to create preview: {str(e)}")
+
+    def _get_complete_workflow_stats(self, results):
+        """Get statistical summary for complete workflow results."""
+        stats_lines = []
+        
+        # Background mask statistics
+        if 'background_mask' in results:
+            total_pixels = results['background_mask'].size
+            bg_pixels = np.sum(results['background_mask'])
+            stats_lines.append(f"Background pixels: {bg_pixels} ({100*bg_pixels/total_pixels:.1f}%)")
+        
+        # Mat uniformity metrics
+        if 'coefficient_of_variation' in results:
+            cv = results['coefficient_of_variation']
+            mean_int = results.get('mean_intensity', 0)
+            std_dev = results.get('std_deviation', 0)
+            stats_lines.append(f"Mat CV: {cv:.4f}")
+            stats_lines.append(f"Mat Mean: {mean_int:.1f} ± {std_dev:.1f}")
+        
+        # Intensity range
+        if 'corrected_image' in results:
+            corrected = results['corrected_image']
+            stats_lines.append(f"Corrected range: {corrected.min()}-{corrected.max()}")
+        
+        return "\n".join(stats_lines)
 
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""
@@ -789,19 +865,20 @@ class MainWindow(tk.Tk):
             config = get_default_config()
             
             # Background correction method
+            # Background correction method mapping
             method_mapping = {
                 "none": BackgroundCorrectionMethod.NONE,
-                "polynomial_surface": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
-                "two_stage": BackgroundCorrectionMethod.TWO_STAGE,
-                "region_leveling": BackgroundCorrectionMethod.REGION_LEVELING,
-                "selective_illumination": BackgroundCorrectionMethod.SELECTIVE_ILLUMINATION,
-                "enhanced_percentile": BackgroundCorrectionMethod.ENHANCED_PERCENTILE,
+                "polynomial": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+                "large_kernel_blur": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
             }
             
             selected_bg_method = self.bg_method_var.get()
             config.processing.background_correction_method = method_mapping.get(
-                selected_bg_method, BackgroundCorrectionMethod.POLYNOMIAL_SURFACE
+                selected_bg_method, BackgroundCorrectionMethod.COMPLETE_WORKFLOW
             )
+            
+            # Store the specific GUI selection for Step 2 method choice
+            config.processing.background_step2_method = selected_bg_method
             
             # Thickness model selection
             thickness_mapping = {

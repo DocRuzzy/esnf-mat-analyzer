@@ -233,6 +233,92 @@ class RulerDetector:
             self.logger.warning("Failed to calculate a reliable scale from detected ticks.")
             return None
 
+    def detect_scale_with_mask(self, image: np.ndarray, exclusion_mask: np.ndarray = None) -> Tuple[Optional[float], Optional[np.ndarray]]:
+        """
+        Detect scale and return both the scale value and a mask of the detected ruler.
+        
+        Args:
+            image: Input image (BGR or grayscale)
+            exclusion_mask: Boolean mask where True indicates areas to exclude from ruler search
+        
+        Returns:
+            Tuple of (scale_pixels_per_mm, ruler_mask) where ruler_mask is True for ruler pixels
+        """
+        if not self.config.enabled:
+            self.logger.info("Ruler detection is disabled. Skipping.")
+            return None, None
+
+        self.logger.debug(f"Starting scale detection with exclusion mask on image shape {image.shape}")
+        original_height, original_width = image.shape[:2]
+
+        # Convert to grayscale
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image.copy()
+        
+        # Apply exclusion mask to gray image for processing
+        if exclusion_mask is not None:
+            # Zero out excluded regions for edge detection
+            gray_image = gray_image.copy()
+            gray_image[exclusion_mask] = 0
+            self.logger.debug(f"Applied exclusion mask covering {np.sum(exclusion_mask)} pixels")
+
+        blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        edges = cv2.Canny(blurred_image, self.config.canny_threshold1, self.config.canny_threshold2)
+
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, self.config.hough_threshold,
+                                minLineLength=self.config.min_line_length,
+                                maxLineGap=self.config.max_line_gap)
+        if lines is None:
+            self.logger.warning("No lines detected.")
+            return None, None
+        self.logger.info(f"Raw lines: {len(lines)}")
+
+        grouped_lines = self._filter_and_group_lines(lines, max_angle_diff_deg=10.0)
+        horizontal_lines = grouped_lines["horizontal"]
+        vertical_lines = grouped_lines["vertical"]
+        self.logger.info(f"H-lines: {len(horizontal_lines)}, V-lines: {len(vertical_lines)}")
+
+        if not horizontal_lines: 
+            return None, None
+
+        min_ruler_len = max(self.config.min_line_length, original_width // 8)
+        ruler_body_cand = self._get_main_ruler_body_lines(horizontal_lines, min_ruler_len, image_height=original_height)
+
+        if ruler_body_cand is None: 
+            return None, None
+            
+        line_u, line_l = ruler_body_cand
+        y_upper_avg = (line_u[0][1] + line_u[0][3]) / 2
+        y_lower_avg = (line_l[0][1] + line_l[0][3]) / 2
+
+        # Create ruler mask
+        ruler_mask = np.zeros((original_height, original_width), dtype=bool)
+        
+        # Create mask for ruler body area
+        ruler_top = int(min(y_upper_avg, y_lower_avg) - 5)  # Add some padding
+        ruler_bottom = int(max(y_upper_avg, y_lower_avg) + 5)
+        ruler_left = int(min(line_u[0][0], line_u[0][2], line_l[0][0], line_l[0][2]) - 5)
+        ruler_right = int(max(line_u[0][0], line_u[0][2], line_l[0][0], line_l[0][2]) + 5)
+        
+        # Ensure bounds are within image
+        ruler_top = max(0, ruler_top)
+        ruler_bottom = min(original_height, ruler_bottom)
+        ruler_left = max(0, ruler_left)
+        ruler_right = min(original_width, ruler_right)
+        
+        ruler_mask[ruler_top:ruler_bottom, ruler_left:ruler_right] = True
+        
+        # Now detect scale using the same logic as detect_scale
+        ticks_result = self._detect_ticks_on_body_lines(line_u, line_l, vertical_lines, gray_image)
+        
+        if ticks_result and ticks_result["valid_tick_spacings"]:
+            spacing_px = np.median(ticks_result["valid_tick_spacings"])
+            calculated_scale = spacing_px / self.config.expected_tick_distance_mm
+            self.logger.info(f"Successfully calculated scale: {calculated_scale:.2f} pixels/mm with ruler mask")
+            return calculated_scale, ruler_mask
+        else:
+            self.logger.warning("Failed to calculate a reliable scale from detected ticks.")
+            return None, ruler_mask  # Return mask even if scale detection failed
+
 # (Keep the if __name__ == '__main__': block)
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)

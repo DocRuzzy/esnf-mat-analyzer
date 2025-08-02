@@ -8,8 +8,8 @@ import time # Added for save_debug_image
 
 from ..core.interfaces import IImageProcessor
 from ..core.data_types import ProcessingConfig
-# Import the mat-level background processor
-from ..processing.mat_level_background_correction import MatLevelBackgroundProcessor
+# Import the advanced background processor following the scientific guide
+from ..processing.advanced_background import AdvancedBackgroundProcessor
 
 def assess_correction_quality(original, corrected, mat_mask):
     """
@@ -54,7 +54,7 @@ class ImageProcessor(IImageProcessor):
         self.logger.info(f"ImageProcessor initialized with config: {self.config}")
 
         # Initialize mat-level background processor
-        self.mat_bg_processor = MatLevelBackgroundProcessor()
+        self.bg_processor = AdvancedBackgroundProcessor()
 
     def load_image(self, path: Path) -> np.ndarray:
         """
@@ -226,39 +226,25 @@ class ImageProcessor(IImageProcessor):
 
         self.logger.debug(f"Applying background correction method: {method_name}")
 
-        # Recommended mat-level background correction methods
-        if method_name in ['polynomial_surface', 'polynomial']:
-            return self.mat_bg_processor.adaptive_polynomial_surface_fitting(
-                image,
-                polynomial_order=getattr(self.config, 'polynomial_order', 3),
-                sample_density=getattr(self.config, 'sample_density', 0.05)
-            )
-        elif method_name == 'two_stage':
-            return self.mat_bg_processor.two_stage_correction(image)
-        elif method_name == 'region_leveling':
-            return self.mat_bg_processor.region_based_leveling(image)
-        elif method_name == 'selective_illumination':
-            return self.mat_bg_processor.selective_illumination_correction(
-                image,
-                preserve_threshold=getattr(self.config, 'preserve_threshold', 0.7),
-                blur_size=getattr(self.config, 'blur_size', 101)
-            )
-        elif method_name == 'enhanced_percentile':
-            return self.mat_bg_processor.enhanced_percentile_with_gradient_preservation(
-                image,
-                background_percentile=getattr(self.config, 'background_percentile', 5.0),
-                gradient_weight=getattr(self.config, 'gradient_weight', 0.5)
-            )
+        # Always use the complete 4-step scientific workflow (except for none)
+        if method_name == 'none':
+            return image
+        
+        # Determine Step 2 method from GUI selection (if available)
+        gui_selection = getattr(self.config, 'background_step2_method', None)
+        if gui_selection:
+            background_method = "polynomial" if gui_selection == "polynomial" else "large_kernel_blur"
         else:
-            self.logger.warning(
-                f"Unknown background correction method: '{method_name}'. "
-                f"Defaulting to 'polynomial_surface'."
-            )
-            return self.mat_bg_processor.adaptive_polynomial_surface_fitting(
-                image,
-                polynomial_order=getattr(self.config, 'polynomial_order', 3),
-                sample_density=getattr(self.config, 'sample_density', 0.05)
-            )
+            # Fallback for backward compatibility
+            background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
+
+        # Apply the complete 4-step scientific workflow
+        results = self.bg_processor.complete_uniformity_analysis(
+            image,
+            background_method=background_method,
+            polynomial_order=getattr(self.config, 'polynomial_order', 2)
+        )
+        return results['corrected_image']
             
     def _apply_normalization_correction(self, image: np.ndarray) -> np.ndarray:
         """
@@ -289,3 +275,50 @@ class ImageProcessor(IImageProcessor):
 
         self.logger.debug("Background leveling complete.")
         return leveled_image
+
+    def apply_background_correction_with_exclusion(self, image: np.ndarray, 
+                                                 exclusion_mask: np.ndarray = None) -> np.ndarray:
+        """
+        Apply background correction to full image while excluding specified regions.
+        
+        This method applies the selected background correction method to the entire image
+        while excluding rulers or other specified regions from the background modeling.
+        
+        Args:
+            image: Input grayscale image
+            exclusion_mask: Boolean mask where True indicates pixels to exclude 
+                          from background correction (e.g., rulers)
+        
+        Returns:
+            Background-corrected image
+        """
+        if not self.config.leveling.enabled:
+            return image
+
+        # Get the background correction method from config
+        method = getattr(self.config, 'background_correction_method', 'polynomial_surface')
+        method_name = getattr(method, 'name', str(method).lower() if method else 'polynomial_surface').lower()
+        
+        self.logger.debug(f"Applying background correction method: {method_name} with exclusions")
+
+        # For exclusion-aware background correction, we need to modify the background modeling
+        if method_name == 'none':
+            return image
+        
+        # Get GUI selection for Step 2 method choice
+        gui_selection = getattr(self.config, 'background_step2_method', None)
+        if gui_selection:
+            background_method = "polynomial" if gui_selection == "polynomial" else "large_kernel_blur"
+        else:
+            # Fallback for backward compatibility
+            background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
+
+        # Apply the complete 4-step scientific workflow with exclusion awareness
+        results = self.bg_processor.complete_uniformity_analysis_with_exclusion(
+            image,
+            background_method=background_method,
+            exclusion_mask=exclusion_mask,
+            polynomial_order=getattr(self.config, 'polynomial_order', 2)
+        )
+        
+        return results['corrected_image']

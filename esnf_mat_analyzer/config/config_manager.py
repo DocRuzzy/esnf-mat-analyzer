@@ -48,10 +48,9 @@ THICKNESS_MODEL_MAP = {
 
 BACKGROUND_CORRECTION_METHOD_MAP = {
     "none": BackgroundCorrectionMethod.NONE,
-    "basic": BackgroundCorrectionMethod.BASIC,
-    "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
-    "restore": BackgroundCorrectionMethod.RESTORE,
-    "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC,
+    "polynomial_surface": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+    "large_kernel_blur": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
+    "complete_workflow": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
 }
 
 

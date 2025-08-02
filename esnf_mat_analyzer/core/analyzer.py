@@ -187,6 +187,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         try:
             # 1. Load and validate image
             raw_image = self.image_processor.load_image(image_path)
+            full_image_shape = raw_image.shape[:2]  # Store original dimensions
         except FileNotFoundError:
             self.logger.error(f"Image not found: {image_path}")
             raise
@@ -194,13 +195,24 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             self.logger.error(f"Failed to load image {image_path}: {ve}")
             raise
 
-        # 2. Ruler Detection (on raw image, if enabled)
+        # 2. Ruler Detection (on FULL image, OUTSIDE user ROI if provided)
+        ruler_mask = None
         if spatial_scale_pixels_per_mm:
             self.logger.info(f"Using provided spatial scale: {spatial_scale_pixels_per_mm:.2f} pixels/mm.")
         elif self.config.ruler_detection.enabled and self.ruler_detector:
-            self.logger.info("Attempting scale detection...")
+            self.logger.info("Attempting scale detection on full image...")
             try:
-                spatial_scale_pixels_per_mm = self.ruler_detector.detect_scale(raw_image)
+                # Create exclusion mask for user ROI during ruler detection
+                ruler_search_mask = None
+                if roi:
+                    ruler_search_mask = np.ones(full_image_shape, dtype=bool)
+                    x, y, w, h = roi
+                    ruler_search_mask[y:y+h, x:x+w] = False  # Exclude user ROI
+                
+                spatial_scale_pixels_per_mm, ruler_mask = self.ruler_detector.detect_scale_with_mask(
+                    raw_image, exclusion_mask=ruler_search_mask
+                )
+                
                 if spatial_scale_pixels_per_mm:
                     self.logger.info(f"Detected spatial scale: {spatial_scale_pixels_per_mm:.2f} pixels/mm.")
                 else:
@@ -208,41 +220,63 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             except Exception as e:
                 self.logger.error(f"Error during scale detection: {e}", exc_info=True)
 
-        # Crop image if ROI is provided
+        # 3. Background Correction (on FULL image, excluding rulers)
+        full_preprocessed_image = self.image_processor.preprocess(raw_image)
+        
+        # Create comprehensive background correction exclusion mask
+        bg_exclusion_mask = None
+        if ruler_mask is not None:
+            bg_exclusion_mask = ruler_mask
+            self.logger.info("Excluding detected rulers from background correction")
+        
+        # Apply background correction to full image
+        corrected_full_image = self.image_processor.apply_background_correction_with_exclusion(
+            full_preprocessed_image, exclusion_mask=bg_exclusion_mask
+        )
+
+        # 4. Extract user ROI from corrected image
         if roi:
-            raw_image = self.image_processor.crop_image(raw_image, roi)
+            x, y, w, h = roi
+            roi_corrected_image = corrected_full_image[y:y+h, x:x+w]
+            roi_raw_image = raw_image[y:y+h, x:x+w] if len(raw_image.shape) == 3 else raw_image[y:y+h, x:x+w]
+            self.logger.info(f"Extracted user ROI: {roi} from corrected image")
+        else:
+            roi_corrected_image = corrected_full_image
+            roi_raw_image = raw_image
+            self.logger.info("Using full corrected image (no user ROI specified)")
 
-        # 3. Preprocess Image (for shape detection and thickness estimation)
-        # It's important that image_processor.preprocess takes the raw_image (RGB)
-        # and returns a grayscale image suitable for downstream tasks.
-        preprocessed_image = self.image_processor.preprocess(raw_image)
-
-        # 4. Detect Shape
+        # 5. Detect Gel Shape (optimal ROI within user ROI)
         try:
-            contour = self.shape_detector.detect(preprocessed_image)
-            if contour is None:
-                raise ValueError("Shape detection failed, no contour found.")
-            mask = self.shape_detector.create_mask(preprocessed_image.shape, contour)
+            # Use the ROI-corrected image for gel detection
+            gel_contour = self.shape_detector.detect(roi_corrected_image)
+            if gel_contour is None:
+                self.logger.warning("Gel shape detection failed, using full ROI")
+                # Fallback: create mask for entire ROI
+                gel_mask = np.ones(roi_corrected_image.shape, dtype=bool)
+            else:
+                gel_mask = self.shape_detector.create_mask(roi_corrected_image.shape, gel_contour)
+                self.logger.info("Successfully detected gel boundary for optimal ROI")
         except Exception as e:
-            self.logger.error(f"Error during shape detection: {e}", exc_info=True)
-            # Depending on desired robustness, could raise or return a partial/error result
-            raise ValueError(f"Shape detection failed for {image_path}") from e
+            self.logger.error(f"Error during gel shape detection: {e}", exc_info=True)
+            # Fallback: use full ROI
+            gel_contour = None
+            gel_mask = np.ones(roi_corrected_image.shape, dtype=bool)
+            self.logger.warning("Using full ROI as fallback for gel detection failure")
 
-
-        # 5. Estimate Thickness
+        # 6. Estimate Thickness (on corrected ROI image with gel mask)
         # ThicknessConfig (self.config.thickness) might have its own calibration_factor
         # set by user for converting model units to physical thickness (e.g., nm).
         # This is separate from the ruler's spatial_scale_pixels_per_mm.
-        thickness_map = self.thickness_estimator.estimate(preprocessed_image, mask)
-        saturation_mask = self.thickness_estimator.get_saturation_mask(preprocessed_image, mask)
+        thickness_map = self.thickness_estimator.estimate(roi_corrected_image, gel_mask)
+        saturation_mask = self.thickness_estimator.get_saturation_mask(roi_corrected_image, gel_mask)
 
-        # 6. Calculate Uniformity Metrics
+        # 7. Calculate Uniformity Metrics (using gel mask for optimal accuracy)
         metrics: Dict[str, float] = {}
         
         # Traditional uniformity metrics
         for metric_calculator in self.uniformity_metrics:
             try:
-                metric_value = metric_calculator.calculate(thickness_map, mask, None)
+                metric_value = metric_calculator.calculate(thickness_map, gel_mask, None)
                 metrics[metric_calculator.name] = metric_value
                 self.logger.debug(f"Calculated {metric_calculator.name}: {metric_value}")
             except Exception as e:
@@ -253,7 +287,7 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         try:
             from ..analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
             mat_analyzer = MultiScaleUniformityAnalyzer()
-            mat_metrics = mat_analyzer.analyze_multiscale_uniformity(thickness_map, mask)
+            mat_metrics = mat_analyzer.analyze_multiscale_uniformity(thickness_map, gel_mask)
             metrics.update(mat_metrics)
             self.logger.debug(f"Mat-scale uniformity metrics calculated: {len(mat_metrics)} metrics")
         except Exception as e:
@@ -262,14 +296,19 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         processing_duration = time.time() - processing_start_time
         self.logger.info(f"Image processing completed in {processing_duration:.2f} seconds.")
 
-        # 7. Store and Return Results
+        # 8. Store and Return Results
         # analysis_metadata can be used for other metadata if needed in the future
-        analysis_metadata: Dict[str, Any] = {}
-        # Add other useful config details to metadata if needed, e.g.:
-        # analysis_metadata['ruler_config_used'] = self.config.ruler_detection
+        analysis_metadata: Dict[str, Any] = {
+            'user_roi': roi,
+            'gel_detection_successful': gel_contour is not None,
+            'ruler_detected': ruler_mask is not None,
+            'background_correction_applied': True,
+            'full_image_shape': full_image_shape,
+            'roi_shape': roi_corrected_image.shape
+        }
 
         # Create results directory (example, could be done by data_exporter or visualizer)
-        results_output_dir = self.config.output_dir / image_path.stem
+        results_output_dir = Path(self.config.output_dir) / image_path.stem
         # results_output_dir.mkdir(parents=True, exist_ok=True) # Defer to exporter/visualizer
 
         if spatial_scale_pixels_per_mm:
@@ -277,9 +316,9 @@ class NanoFiberAnalyzer(AnalyzerInterface):
 
         result = AnalysisResult(
             image_path=image_path,
-            contour=contour,
+            contour=gel_contour,  # This is now the detected gel boundary
             thickness_map=thickness_map, # This is the (possibly) calibrated thickness map
-            mask=mask,
+            mask=gel_mask,  # This is now the optimal gel mask
             saturation_mask=saturation_mask,
             metrics=metrics,
             spatial_scale_pixels_per_mm=spatial_scale_pixels_per_mm, # <<< Use new field
@@ -433,13 +472,13 @@ class NanoFiberAnalyzer(AnalyzerInterface):
             >>> analyzer = NanoFiberAnalyzer.from_config(config)
             >>> result = analyzer.process_image("sample.tif")
         """
-        from ..core.container import create_analyzer_from_config
+        from ..main import setup_dependencies
         
         if config is None:
             raise ValueError("Configuration cannot be None")
             
         try:
-            return create_analyzer_from_config(config)
+            return setup_dependencies(config)
         except Exception as e:
             logger.error(f"Failed to create analyzer from config: {e}")
             raise RuntimeError(f"Analyzer initialization failed: {e}") from e
