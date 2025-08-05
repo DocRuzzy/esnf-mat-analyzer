@@ -262,6 +262,24 @@ class VisualizationConfig:
 
 
 @dataclass
+class RulerScoringConfig:
+    """Parameters for the scoring-based ruler body detection model."""
+    enabled: bool = True
+    """Enable or disable the scoring-based model in favor of the legacy model."""
+    min_thickness_px: int = 5
+    """Minimum plausible thickness for a ruler body in pixels."""
+    max_thickness_px: int = 50
+    """Maximum plausible thickness for a ruler body in pixels."""
+    length_weight: float = 1.0
+    """Weight for the combined length of the ruler lines in the score."""
+    overlap_weight: float = 1.5
+    """Weight for the horizontal overlap of the ruler lines in the score."""
+    tick_count_weight: float = 3.0
+    """Weight for the number of detected ticks between the lines in the score."""
+    parallelism_penalty: float = 2.0
+    """Penalty multiplier for lines that are not parallel."""
+
+@dataclass
 class RulerDetectionConfig:
     """Configuration parameters for ruler detection and scale calibration."""
 
@@ -285,6 +303,59 @@ class RulerDetectionConfig:
 
     hough_threshold: int = 20
     """Accumulator threshold parameter for Hough Line Transform."""
+
+    min_tick_separation_px: int = 5
+    """Minimum pixel distance between two adjacent ticks to be considered distinct."""
+
+    tick_y_tolerance_factor: float = 1.5
+    """Factor to extend the search for ticks vertically beyond the ruler body (e.g., 1.5 means 150% of ruler thickness)."""
+
+    min_tick_length_factor: float = 0.3
+    """Minimum length of a tick as a factor of the ruler's thickness."""
+
+    abs_min_tick_length_px: int = 5
+    """Absolute minimum length of a tick in pixels, overrides the factor if larger."""
+
+    max_tick_length_factor: float = 3.0
+    """Maximum length of a tick as a factor of the ruler's thickness."""
+
+    scoring: RulerScoringConfig = field(default_factory=RulerScoringConfig)
+    """Configuration for the scoring-based ruler detection model."""
+
+
+@dataclass
+class Tick:
+    """Represents a single detected tick mark on a ruler."""
+    x_position: float
+    """The x-coordinate of the tick mark in the image."""
+    line: np.ndarray
+    """The (x1, y1, x2, y2) coordinates of the line segment forming the tick."""
+
+@dataclass
+class Ruler:
+    """
+    Represents a detected ruler, its components, and the calculated scale.
+
+    This data structure holds all information related to a ruler found in an
+    image, making it easier to pass this information between different parts of
+    the analysis pipeline.
+    """
+    body_lines: Tuple[np.ndarray, np.ndarray]
+    """A tuple containing the two main parallel lines that form the ruler's body."""
+
+    ticks: List[Tick]
+    """A list of `Tick` objects detected on the ruler."""
+
+    scale_px_per_mm: Optional[float]
+    """The calculated scale in pixels per millimeter. None if calculation failed."""
+
+    mask: np.ndarray
+    """A boolean numpy array with the same dimensions as the image, where True
+    indicates the area occupied by the detected ruler."""
+
+    roi: Tuple[int, int, int, int]
+    """The bounding box (x_start, y_start, x_end, y_end) of the region where the
+    ruler was detected."""
 
 
 @dataclass
