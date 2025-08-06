@@ -316,11 +316,17 @@ class RulerDetectionConfig:
     abs_min_tick_length_px: int = 5
     """Absolute minimum length of a tick in pixels, overrides the factor if larger."""
 
-    max_tick_length_factor: float = 3.0
+    max_tick_length_factor: float = 4.0
     """Maximum length of a tick as a factor of the ruler's thickness."""
 
     scoring: RulerScoringConfig = field(default_factory=RulerScoringConfig)
     """Configuration for the scoring-based ruler detection model."""
+
+    use_deep_gp: bool = False
+    """Whether to use the DeepGP model for scale calculation."""
+
+    deep_gp_model_path: Optional[str] = None
+    """Path to the trained DeepGP model weights file."""
 
 
 @dataclass

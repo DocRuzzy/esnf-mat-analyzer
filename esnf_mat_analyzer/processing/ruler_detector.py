@@ -4,6 +4,8 @@ import logging
 from typing import Optional, Tuple, List, Dict
 from esnf_mat_analyzer.core.data_types import RulerDetectionConfig, Ruler, Tick
 import math
+import torch
+from .deep_gp_module import DeepGPModule
 
 class RulerDetector:
     """
@@ -35,6 +37,23 @@ class RulerDetector:
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"RulerDetector initialized with config: {self.config}")
+        self.deep_gp_model = None
+        if self.config.use_deep_gp:
+            if self.config.deep_gp_model_path:
+                try:
+                    self.deep_gp_model = DeepGPModule()
+                    self.deep_gp_model.load_state_dict(torch.load(self.config.deep_gp_model_path))
+                    self.deep_gp_model.eval()
+                    self.logger.info(f"Loaded DeepGP model from {self.config.deep_gp_model_path}")
+                except FileNotFoundError:
+                    self.logger.error(f"DeepGP model file not found at {self.config.deep_gp_model_path}. Disabling DeepGP.")
+                    self.config.use_deep_gp = False
+                except Exception as e:
+                    self.logger.error(f"Failed to load DeepGP model: {e}. Disabling DeepGP.")
+                    self.config.use_deep_gp = False
+            else:
+                self.logger.warning("`use_deep_gp` is True, but no model path was provided. Disabling DeepGP.")
+                self.config.use_deep_gp = False
 
     def _filter_and_group_lines(self, lines: np.ndarray, max_angle_diff_deg: float = 5.0) -> Dict[str, List[np.ndarray]]:
         """
@@ -275,7 +294,7 @@ class RulerDetector:
             std_dev_spacing = np.std(distances)
             coeff_of_variation = std_dev_spacing / median_spacing_px
             self.logger.debug(f"Tick spacing StdDev: {std_dev_spacing:.2f}, Coeff of Variation: {coeff_of_variation:.2f}")
-            max_spacing_variation_coeff = 0.25
+            max_spacing_variation_coeff = 0.2
             if coeff_of_variation > max_spacing_variation_coeff:
                 self.logger.warning(f"High variability in tick spacing (CoV = {coeff_of_variation:.2f}). Scale may be unreliable.")
 
@@ -287,6 +306,35 @@ class RulerDetector:
         calculated_scale = median_spacing_px / self.config.expected_tick_distance_mm
         self.logger.info(f"Calculated scale: {calculated_scale:.2f} pixels / {self.config.expected_tick_distance_mm} mm.")
         return calculated_scale
+
+    def _calculate_scale_with_deep_gp(self, ticks: List[Tick], image_width: int) -> Optional[float]:
+        """
+        Calculates the scale using the DeepGP model.
+        """
+        if len(ticks) < 3: # DeepGP might need a few ticks to find a pattern
+            self.logger.warning("Not enough ticks for DeepGP model, falling back to statistical method.")
+            return self._calculate_scale_from_ticks(ticks)
+
+        # 1. Create a 1D signal from the tick positions
+        signal = torch.zeros(1, 1, image_width)
+        for tick in ticks:
+            pos = int(round(tick.x_position))
+            if 0 <= pos < image_width:
+                signal[0, 0, pos] = 1.0
+
+        # 2. Predict the GP parameters
+        try:
+            gp_params = self.deep_gp_model.predict_gp_params(signal)
+            m0, m1, r = gp_params[0].tolist()
+            self.logger.info(f"DeepGP predicted params (m0, m1, r): ({m0:.2f}, {m1:.2f}, {r:.4f})")
+
+            # 3. Placeholder logic
+            self.logger.warning("DeepGP integration is a placeholder. Returning statistical scale.")
+            return self._calculate_scale_from_ticks(ticks)
+
+        except Exception as e:
+            self.logger.error(f"Error during DeepGP prediction: {e}")
+            return self._calculate_scale_from_ticks(ticks)
 
     def detect(self, image: np.ndarray, exclusion_mask: Optional[np.ndarray] = None) -> Optional[Ruler]:
         """
@@ -368,7 +416,14 @@ class RulerDetector:
         tick_positions = [f"{t.x_position:.0f}" for t in ticks]
         self.logger.info(f"Found {len(ticks)} tick candidates in ROI at x-positions: {tick_positions}")
 
-        calculated_scale = self._calculate_scale_from_ticks(ticks)
+        if self.config.use_deep_gp and self.deep_gp_model:
+            calculated_scale = self._calculate_scale_with_deep_gp(ticks, original_width)
+        else:
+            calculated_scale = self._calculate_scale_from_ticks(ticks)
+
+        if calculated_scale is None:
+            self.logger.warning("Scale calculation failed, cannot create Ruler object.")
+            return None
         
         ruler_mask = np.zeros((original_height, original_width), dtype=bool)
         ruler_top = int(y_upper_avg - 5)

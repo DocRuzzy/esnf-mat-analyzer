@@ -3,10 +3,15 @@ import numpy as np
 import cv2
 from pathlib import Path
 import logging # For checking log messages if needed in more advanced tests
-from typing import Tuple
+from typing import Tuple, Optional
+
+import torch
+from unittest.mock import MagicMock
 
 from esnf_mat_analyzer.processing.ruler_detector import RulerDetector
 from esnf_mat_analyzer.core.data_types import RulerDetectionConfig
+from esnf_mat_analyzer.processing.deep_gp_module import DeepGPModule
+
 
 # (default_ruler_config and ruler_detector fixtures remain the same)
 
@@ -34,16 +39,19 @@ def create_test_ruler_image(
     tick_width: int = 1,
     ruler_color: Tuple[int,int,int] = (20,20,20),
     tick_color: Tuple[int,int,int] = (10,10,10),
-    background_color: Tuple[int,int,int] = (230,230,230)
+    background_color: Tuple[int,int,int] = (230,230,230),
+    img: Optional[np.ndarray] = None
     ) -> np.ndarray:
     """
-    Generates a test image with a horizontal ruler.
+    Generates or draws on a test image with a horizontal ruler.
     Args:
         ruler_y_top: Y-coordinate of the top edge of the ruler body.
         ruler_thickness: Thickness of the ruler body in pixels.
         tick_extension: How many pixels ticks extend above top and below bottom edge.
+        img: Optional image to draw on. If None, a new image is created.
     """
-    img = np.full((height, width, 3), background_color, dtype=np.uint8)
+    if img is None:
+        img = np.full((height, width, 3), background_color, dtype=np.uint8)
     
     ruler_y_bottom = ruler_y_top + ruler_thickness
     
@@ -144,7 +152,7 @@ class TestRulerDetector:
         with caplog.at_level(logging.WARNING):
             ruler = detector.detect(img)
 
-        assert "High variability in tick spacing" in caplog.text
+        assert any("High variability in tick spacing" in record.message for record in caplog.records)
         assert ruler is not None, "A ruler should still be detected based on median"
         assert ruler.scale_px_per_mm is not None
         
@@ -160,17 +168,17 @@ class TestRulerDetector:
 
         # --- Draw the BETTER ruler (longer, more ticks) ---
         good_ruler_y = 100
-        create_test_ruler_image(img, width=img_width, height=img_height,
+        create_test_ruler_image(width=img_width, height=img_height,
             ruler_y_top=good_ruler_y, ruler_thickness=15,
             tick_start_x=50, num_major_ticks=10, pixels_per_major_tick=50,
-            tick_extension=10)
+            tick_extension=10, img=img)
 
         # --- Draw a DECOY ruler (shorter, fewer ticks) ---
         decoy_ruler_y = 300
-        create_test_ruler_image(img, width=img_width, height=img_height,
+        create_test_ruler_image(width=img_width, height=img_height,
             ruler_y_top=decoy_ruler_y, ruler_thickness=10,
             tick_start_x=100, num_major_ticks=4, pixels_per_major_tick=40,
-            tick_extension=8)
+            tick_extension=8, img=img)
 
         ruler = detector.detect(img)
 
@@ -179,3 +187,48 @@ class TestRulerDetector:
         detected_ruler_y = (ruler.body_lines[0][0][1] + ruler.body_lines[1][0][1]) / 2
         assert abs(detected_ruler_y - (good_ruler_y + 15/2)) < 10, \
             "The scoring model did not select the correct ruler candidate"
+
+    def test_detect_with_deep_gp_mocked(self, default_ruler_config: RulerDetectionConfig, monkeypatch, caplog):
+        """Test the DeepGP integration with a mocked model."""
+        # 1. Mock the DeepGPModule class
+        mock_model_instance = MagicMock()
+        mock_model_instance.predict_gp_params.return_value = torch.tensor([[1.0, 2.0, 75.0]])
+
+        mock_deep_gp_module = MagicMock(return_value=mock_model_instance)
+        monkeypatch.setattr('esnf_mat_analyzer.processing.ruler_detector.DeepGPModule', mock_deep_gp_module)
+        monkeypatch.setattr(torch, 'load', lambda path: {})
+
+        # 2. Configure the detector to use the (mocked) DeepGP model
+        config = default_ruler_config
+        config.use_deep_gp = True
+        config.deep_gp_model_path = "dummy/path/to/model.pth" # Path is needed to trigger loading
+
+        detector = RulerDetector(config=config)
+
+        # 3. Create a test image and run detection
+        img_width, img_height = 500, 300
+        pixels_between_ticks = 75
+        test_image = create_test_ruler_image(
+            width=img_width, height=img_height, ruler_y_top=140,
+            ruler_thickness=20, tick_start_x=70, num_major_ticks=5,
+            pixels_per_major_tick=pixels_between_ticks, tick_extension=15
+        )
+
+        with caplog.at_level(logging.INFO):
+            ruler = detector.detect(test_image)
+
+        # 4. Assertions
+        assert ruler is not None, "A ruler should be detected"
+
+        # Check that the DeepGP prediction method was called
+        mock_model_instance.predict_gp_params.assert_called_once()
+
+        # Check that the log message indicates DeepGP was used
+        assert "DeepGP predicted params" in caplog.text
+        assert "DeepGP integration is a placeholder" in caplog.text
+
+        # Since the implementation falls back to the statistical method,
+        # the final scale should be the same as the standard test.
+        assert ruler.scale_px_per_mm is not None
+        expected_scale = pixels_between_ticks / config.expected_tick_distance_mm
+        assert abs(ruler.scale_px_per_mm - expected_scale) < 0.1
