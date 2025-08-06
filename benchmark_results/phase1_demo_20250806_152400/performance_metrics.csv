@@ -1,0 +1,4 @@
+Method,success_rate,avg_processing_time,total_images,successful_images,avg_uniformity,std_uniformity
+Default ESNF,1.0,4.873099724451701,3,3,0.0,0.0
+Digits Detection,0.3333333333333333,0.00650485356648763,3,1,,
+Mark Frequency,1.0,0.018418232599894207,3,3,,

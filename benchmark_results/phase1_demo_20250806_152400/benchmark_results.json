@@ -1,0 +1,65 @@
+{
+  "timestamp": "2025-08-06T15:24:15.754413",
+  "dataset_size": 3,
+  "methods_compared": [
+    "Default ESNF",
+    "Digits Detection",
+    "Mark Frequency"
+  ],
+  "metrics": {
+    "Default ESNF": {
+      "success_rate": 1.0,
+      "avg_processing_time": 4.873099724451701,
+      "total_images": 3,
+      "successful_images": 3,
+      "avg_uniformity": 0.0,
+      "std_uniformity": 0.0
+    },
+    "Digits Detection": {
+      "success_rate": 0.3333333333333333,
+      "avg_processing_time": 0.00650485356648763,
+      "total_images": 3,
+      "successful_images": 1
+    },
+    "Mark Frequency": {
+      "success_rate": 1.0,
+      "avg_processing_time": 0.018418232599894207,
+      "total_images": 3,
+      "successful_images": 3
+    }
+  },
+  "relative_performance": {
+    "best_performers": {
+      "success_rate": [
+        "Default ESNF",
+        1.0
+      ],
+      "processing_time": [
+        "Digits Detection",
+        0.00650485356648763
+      ]
+    },
+    "performance_matrix": {
+      "Default ESNF": {
+        "success_rate": 1.0,
+        "avg_processing_time": 4.873099724451701,
+        "total_images": 3,
+        "successful_images": 3,
+        "avg_uniformity": 0.0,
+        "std_uniformity": 0.0
+      },
+      "Digits Detection": {
+        "success_rate": 0.3333333333333333,
+        "avg_processing_time": 0.00650485356648763,
+        "total_images": 3,
+        "successful_images": 1
+      },
+      "Mark Frequency": {
+        "success_rate": 1.0,
+        "avg_processing_time": 0.018418232599894207,
+        "total_images": 3,
+        "successful_images": 3
+      }
+    }
+  }
+}

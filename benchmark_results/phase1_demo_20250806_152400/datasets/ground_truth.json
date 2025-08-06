@@ -1,0 +1,132 @@
+[
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0000.png",
+    "ruler_present": true,
+    "expected_scale": 7.3,
+    "expected_uniformity": 0.7247018734661655,
+    "mat_region": [
+      100,
+      100,
+      559,
+      617
+    ],
+    "quality_score": 0.7999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0001.png",
+    "ruler_present": true,
+    "expected_scale": 7.7,
+    "expected_uniformity": 0.8019371120110956,
+    "mat_region": [
+      100,
+      100,
+      626,
+      539
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0002.png",
+    "ruler_present": true,
+    "expected_scale": 7.2,
+    "expected_uniformity": 0.9334506673379135,
+    "mat_region": [
+      100,
+      100,
+      859,
+      333
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0003.png",
+    "ruler_present": true,
+    "expected_scale": 7.4,
+    "expected_uniformity": 0.8183659269811079,
+    "mat_region": [
+      100,
+      100,
+      667,
+      519
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0004.png",
+    "ruler_present": true,
+    "expected_scale": 6.3,
+    "expected_uniformity": 0.6590231518184345,
+    "mat_region": [
+      100,
+      100,
+      830,
+      672
+    ],
+    "quality_score": 0.7999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0005.png",
+    "ruler_present": true,
+    "expected_scale": 6.5,
+    "expected_uniformity": 0.43200647270491466,
+    "mat_region": [
+      100,
+      100,
+      518,
+      406
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0006.png",
+    "ruler_present": true,
+    "expected_scale": 6.9,
+    "expected_uniformity": 0.8623418911037712,
+    "mat_region": [
+      100,
+      100,
+      629,
+      438
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0007.png",
+    "ruler_present": true,
+    "expected_scale": 9.5,
+    "expected_uniformity": 0.8800394933315194,
+    "mat_region": [
+      100,
+      100,
+      866,
+      675
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0008.png",
+    "ruler_present": true,
+    "expected_scale": 6.6,
+    "expected_uniformity": 0.8555197522527362,
+    "mat_region": [
+      100,
+      100,
+      800,
+      481
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_demo_20250806_152400\\datasets\\synthetic_image_0009.png",
+    "ruler_present": false,
+    "expected_scale": null,
+    "expected_uniformity": 0.38842364764826,
+    "mat_region": [
+      100,
+      100,
+      756,
+      386
+    ],
+    "quality_score": 0.8999999999999999
+  }
+]

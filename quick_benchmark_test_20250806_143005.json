@@ -1,0 +1,100 @@
+{
+  "timestamp": "2025-08-06T14:30:05.096702",
+  "test_type": "quick_benchmark_validation",
+  "results": [
+    {
+      "image_name": "bracket.png",
+      "processing_time": 99.3055591583252,
+      "success": true,
+      "image_dimensions": [
+        1816,
+        2420
+      ],
+      "roi_used": [
+        302,
+        403,
+        1212,
+        1614
+      ],
+      "overall_uniformity": null,
+      "cv_uniformity": null,
+      "anisotropy_index": null,
+      "ruler_detected": false,
+      "detected_scale": null,
+      "metrics_count": 8
+    },
+    {
+      "image_name": "square.png",
+      "processing_time": 98.5510675907135,
+      "success": true,
+      "image_dimensions": [
+        1816,
+        2420
+      ],
+      "roi_used": [
+        302,
+        403,
+        1212,
+        1614
+      ],
+      "overall_uniformity": null,
+      "cv_uniformity": null,
+      "anisotropy_index": null,
+      "ruler_detected": false,
+      "detected_scale": null,
+      "metrics_count": 8
+    },
+    {
+      "image_name": "square20L1H1.png",
+      "processing_time": 96.12468123435974,
+      "success": true,
+      "image_dimensions": [
+        1816,
+        2420
+      ],
+      "roi_used": [
+        302,
+        403,
+        1212,
+        1614
+      ],
+      "overall_uniformity": null,
+      "cv_uniformity": null,
+      "anisotropy_index": null,
+      "ruler_detected": false,
+      "detected_scale": null,
+      "metrics_count": 8
+    }
+  ],
+  "baseline_tests": {
+    "digits_detection": "completed",
+    "mark_frequency": "completed"
+  },
+  "metrics_tests": {
+    "mape": 2.4174825174825156,
+    "mape_768": 2.4174825174825156,
+    "detection_accuracy": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1_score": 0.6666666666666666,
+      "accuracy": 0.6,
+      "true_positives": 2,
+      "false_positives": 1,
+      "false_negatives": 1,
+      "true_negatives": 1
+    }
+  },
+  "validation_tests": {
+    "total_samples": 2,
+    "valid_samples": 2,
+    "issues": [],
+    "quality_stats": {
+      "mean_quality": 0.8500000000000001,
+      "std_quality": 0.04999999999999999,
+      "min_quality": 0.8,
+      "max_quality": 0.9
+    },
+    "validity_rate": 1.0
+  },
+  "framework_status": "ready"
+}

@@ -1,0 +1,52 @@
+{
+  "timestamp": "2025-08-06T14:05:05.335448",
+  "test_type": "quick_benchmark_validation",
+  "results": [
+    {
+      "image_name": "bracket.png",
+      "success": false,
+      "error": "'AnalysisResult' object has no attribute 'scale_info'"
+    },
+    {
+      "image_name": "square.png",
+      "success": false,
+      "error": "'AnalysisResult' object has no attribute 'scale_info'"
+    },
+    {
+      "image_name": "square20L1H1.png",
+      "success": false,
+      "error": "'AnalysisResult' object has no attribute 'scale_info'"
+    }
+  ],
+  "baseline_tests": {
+    "digits_detection": "completed",
+    "mark_frequency": "completed"
+  },
+  "metrics_tests": {
+    "mape": 2.4174825174825156,
+    "mape_768": 2.4174825174825156,
+    "detection_accuracy": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1_score": 0.6666666666666666,
+      "accuracy": 0.6,
+      "true_positives": 2,
+      "false_positives": 1,
+      "false_negatives": 1,
+      "true_negatives": 1
+    }
+  },
+  "validation_tests": {
+    "total_samples": 2,
+    "valid_samples": 2,
+    "issues": [],
+    "quality_stats": {
+      "mean_quality": 0.8500000000000001,
+      "std_quality": 0.04999999999999999,
+      "min_quality": 0.8,
+      "max_quality": 0.9
+    },
+    "validity_rate": 1.0
+  },
+  "framework_status": "ready"
+}
