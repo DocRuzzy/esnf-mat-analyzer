@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-08-08T09:11:04.409820",
+  "dataset_size": 5,
+  "methods_compared": [
+    "Digits Detection",
+    "Mark Frequency"
+  ],
+  "metrics": {
+    "Digits Detection": {
+      "success_rate": 0.4,
+      "avg_processing_time": 0.013988733291625977,
+      "total_images": 5,
+      "successful_images": 2
+    },
+    "Mark Frequency": {
+      "success_rate": 1.0,
+      "avg_processing_time": 0.026731300354003906,
+      "total_images": 5,
+      "successful_images": 5
+    }
+  },
+  "relative_performance": {
+    "best_performers": {
+      "success_rate": [
+        "Mark Frequency",
+        1.0
+      ],
+      "processing_time": [
+        "Digits Detection",
+        0.013988733291625977
+      ]
+    },
+    "performance_matrix": {
+      "Digits Detection": {
+        "success_rate": 0.4,
+        "avg_processing_time": 0.013988733291625977,
+        "total_images": 5,
+        "successful_images": 2
+      },
+      "Mark Frequency": {
+        "success_rate": 1.0,
+        "avg_processing_time": 0.026731300354003906,
+        "total_images": 5,
+        "successful_images": 5
+      }
+    }
+  }
+}

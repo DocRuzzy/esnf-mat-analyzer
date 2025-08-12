@@ -635,7 +635,7 @@ class MainWindow(tk.Tk):
         # Load and preprocess the image
         try:
             import cv2
-            from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+            from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
             processor = AdvancedBackgroundProcessor()
 
             raw_image = cv2.imread(str(self.current_image_path))

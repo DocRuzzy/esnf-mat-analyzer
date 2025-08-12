@@ -133,7 +133,6 @@ extend-exclude = '''
 minversion = "6.0"
 testpaths = [
     "tests",
-    "esnf_mat_analyzer/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

@@ -6,6 +6,9 @@ pandas
 pyyaml
 piexif
 
+# Test dependencies
+pytest
+
 # Optional CLI enhancements
 colorama
 tqdm

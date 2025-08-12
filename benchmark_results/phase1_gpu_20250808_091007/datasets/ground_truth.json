@@ -1,0 +1,67 @@
+[
+  {
+    "image_path": "benchmark_results\\phase1_gpu_20250808_091007\\datasets\\synthetic_image_0000.png",
+    "ruler_present": true,
+    "expected_scale": 9.7,
+    "expected_uniformity": 0.4463351103733969,
+    "mat_region": [
+      100,
+      100,
+      850,
+      392
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_gpu_20250808_091007\\datasets\\synthetic_image_0001.png",
+    "ruler_present": true,
+    "expected_scale": 6.5,
+    "expected_uniformity": 0.6638981901225041,
+    "mat_region": [
+      100,
+      100,
+      614,
+      401
+    ],
+    "quality_score": 0.9999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_gpu_20250808_091007\\datasets\\synthetic_image_0002.png",
+    "ruler_present": false,
+    "expected_scale": null,
+    "expected_uniformity": 0.4080741278222261,
+    "mat_region": [
+      100,
+      100,
+      743,
+      304
+    ],
+    "quality_score": 0.8999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_gpu_20250808_091007\\datasets\\synthetic_image_0003.png",
+    "ruler_present": false,
+    "expected_scale": null,
+    "expected_uniformity": 0.6901078581036209,
+    "mat_region": [
+      100,
+      100,
+      673,
+      466
+    ],
+    "quality_score": 0.8999999999999999
+  },
+  {
+    "image_path": "benchmark_results\\phase1_gpu_20250808_091007\\datasets\\synthetic_image_0004.png",
+    "ruler_present": true,
+    "expected_scale": 7.3,
+    "expected_uniformity": 0.6565237042281601,
+    "mat_region": [
+      100,
+      100,
+      583,
+      649
+    ],
+    "quality_score": 0.7999999999999999
+  }
+]

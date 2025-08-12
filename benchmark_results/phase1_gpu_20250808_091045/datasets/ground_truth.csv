@@ -1,0 +1,6 @@
+image_path,ruler_present,expected_scale,expected_uniformity,mat_region_x,mat_region_y,mat_region_w,mat_region_h,quality_score
+benchmark_results\phase1_gpu_20250808_091045\datasets\synthetic_image_0000.png,True,9.1,0.5258264602836857,100,100,511,311,0.9999999999999999
+benchmark_results\phase1_gpu_20250808_091045\datasets\synthetic_image_0001.png,False,,0.7823354074497173,100,100,700,458,0.8999999999999999
+benchmark_results\phase1_gpu_20250808_091045\datasets\synthetic_image_0002.png,True,9.3,0.4600173850463793,100,100,730,328,0.9999999999999999
+benchmark_results\phase1_gpu_20250808_091045\datasets\synthetic_image_0003.png,True,9.4,0.38742025167903726,100,100,644,628,0.9999999999999999
+benchmark_results\phase1_gpu_20250808_091045\datasets\synthetic_image_0004.png,True,6.4,0.9307483679387452,100,100,516,637,0.9999999999999999

@@ -4,8 +4,27 @@ import logging
 from typing import Optional, Tuple, List, Dict
 from esnf_mat_analyzer.core.data_types import RulerDetectionConfig, Ruler, Tick
 import math
-import torch
-from .deep_gp_module import DeepGPModule
+
+# Optional heavy dependency (PyTorch) for experimental DeepGP functionality.
+# Import errors (including OSError from mismatched binaries) should not break core features.
+try:  # pragma: no cover - defensive import handling
+    import torch  # type: ignore
+    _TORCH_AVAILABLE = True
+    _TORCH_IMPORT_ERROR = None
+except Exception as _e:  # Broad except to catch WinError 193 and others
+    torch = None  # type: ignore
+    _TORCH_AVAILABLE = False
+    _TORCH_IMPORT_ERROR = _e
+
+def _lazy_import_deep_gp():  # pragma: no cover - exercised only when feature enabled
+    """Safely import DeepGPModule only when torch is available and feature enabled."""
+    if not _TORCH_AVAILABLE:
+        return None
+    try:
+        from .deep_gp_module import DeepGPModule  # local import to avoid unconditional torch import
+        return DeepGPModule
+    except Exception:
+        return None
 
 class RulerDetector:
     """
@@ -39,21 +58,41 @@ class RulerDetector:
         self.logger.info(f"RulerDetector initialized with config: {self.config}")
         self.deep_gp_model = None
         if self.config.use_deep_gp:
-            if self.config.deep_gp_model_path:
-                try:
-                    self.deep_gp_model = DeepGPModule()
-                    self.deep_gp_model.load_state_dict(torch.load(self.config.deep_gp_model_path))
-                    self.deep_gp_model.eval()
-                    self.logger.info(f"Loaded DeepGP model from {self.config.deep_gp_model_path}")
-                except FileNotFoundError:
-                    self.logger.error(f"DeepGP model file not found at {self.config.deep_gp_model_path}. Disabling DeepGP.")
-                    self.config.use_deep_gp = False
-                except Exception as e:
-                    self.logger.error(f"Failed to load DeepGP model: {e}. Disabling DeepGP.")
-                    self.config.use_deep_gp = False
-            else:
-                self.logger.warning("`use_deep_gp` is True, but no model path was provided. Disabling DeepGP.")
+            if not _TORCH_AVAILABLE:
+                self.logger.warning(
+                    "PyTorch unavailable ({}). Disabling DeepGP scale refinement.".format(
+                        _TORCH_IMPORT_ERROR.__class__.__name__ if _TORCH_IMPORT_ERROR else "import error"
+                    )
+                )
                 self.config.use_deep_gp = False
+            else:
+                DeepGPModule = _lazy_import_deep_gp()
+                if DeepGPModule is None:
+                    self.logger.warning("DeepGP module import failed; disabling DeepGP feature.")
+                    self.config.use_deep_gp = False
+                elif not self.config.deep_gp_model_path:
+                    self.logger.warning("`use_deep_gp` set without model path; disabling DeepGP.")
+                    self.config.use_deep_gp = False
+                else:
+                    try:
+                        self.deep_gp_model = DeepGPModule()
+                        # torch is guaranteed non-None here
+                        self.deep_gp_model.load_state_dict(torch.load(self.config.deep_gp_model_path, map_location="cpu"))  # type: ignore
+                        self.deep_gp_model.eval()
+                        self.logger.info(
+                            f"Loaded DeepGP model from {self.config.deep_gp_model_path}"
+                        )
+                    except FileNotFoundError:
+                        self.logger.error(
+                            f"DeepGP model file not found at {self.config.deep_gp_model_path}. Disabling DeepGP."
+                        )
+                        self.config.use_deep_gp = False
+                    except Exception as e:
+                        self.logger.error(
+                            f"Failed to load DeepGP model: {e}. Disabling DeepGP.",
+                            exc_info=True,
+                        )
+                        self.config.use_deep_gp = False
 
     def _filter_and_group_lines(self, lines: np.ndarray, max_angle_diff_deg: float = 5.0) -> Dict[str, List[np.ndarray]]:
         """
@@ -424,7 +463,7 @@ class RulerDetector:
         if calculated_scale is None:
             self.logger.warning("Scale calculation failed, cannot create Ruler object.")
             return None
-        
+
         ruler_mask = np.zeros((original_height, original_width), dtype=bool)
         ruler_top = int(y_upper_avg - 5)
         ruler_bottom = int(y_lower_avg + 5)
@@ -433,11 +472,13 @@ class RulerDetector:
         ruler_mask[max(0, ruler_top):min(original_height, ruler_bottom),
                    max(0, ruler_left):min(original_width, ruler_right)] = True
 
-        return Ruler(body_lines=ruler_body_lines,
-                     ticks=ticks,
-                     scale_px_per_mm=calculated_scale,
-                     mask=ruler_mask,
-                     roi=roi)
+        return Ruler(
+            body_lines=ruler_body_lines,
+            ticks=ticks,
+            scale_px_per_mm=calculated_scale,
+            mask=ruler_mask,
+            roi=roi,
+        )
 
     def detect_scale(self, image: np.ndarray) -> Optional[float]:
         """

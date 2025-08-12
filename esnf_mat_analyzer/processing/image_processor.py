@@ -9,7 +9,7 @@ import time # Added for save_debug_image
 from ..core.interfaces import IImageProcessor
 from ..core.data_types import ProcessingConfig
 # Import the advanced background processor following the scientific guide
-from ..processing.advanced_background import AdvancedBackgroundProcessor
+from ..processing.background_correction.advanced import AdvancedBackgroundProcessor
 
 def assess_correction_quality(original, corrected, mat_mask):
     """
