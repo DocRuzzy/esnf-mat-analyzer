@@ -30,6 +30,10 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by AI as
 | T016 | Automatic method recommendation feature | TODO | T015 | - | Use composite metric to auto-pick method in GUI/CLI. |
 | T017 | Expose per-method tunable parameters via config/UI | TODO | T013 | - | Add sliders/fields (kernel sizes, percentile) and config binding. |
 | T018 | CLI benchmarking command for background methods | TODO | T015 | - | Add `esnf-analyzer bg-benchmark <img_dir>` producing CSV of metrics. |
+| T019 | Add optional `pywt` dependency and graceful fallback for multiscale analysis | DONE | T007 | - | Make `pywt` optional: use it when available; otherwise use memory-safe fallback. Add install docs and tests. (2025-09-05) |
+| T020 | Fix multiscale fallback memory usage (prevent giant allocations) | DONE | T019,T007 | - | Update `_fallback_multiscale_analysis` to downsample, process in chunks, or use percentiles to avoid full-array temporaries. Add unit test for large images. (2025-09-05) |
+| T021 | Improve ruler detection robustness and graceful fallback | TODO | T001 | - | Fix ruler detection failures; when scale undetected provide UI prompt and allow manual scale entry. Add test for missing ruler. |
+| T022 | Add CI integration test for full pipeline on representative sample image | TODO | T015 | - | Run full pipeline in CI with smaller sample, assert no dependency errors and memory bounds; catch regressions. |
 
 ## Completed Tasks
 
