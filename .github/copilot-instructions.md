@@ -154,3 +154,12 @@ An AI-maintained file `task-ledger.md` at the repository root tracks tasks (ID, 
 Statuses: `TODO`, `IN-PROGRESS`, `BLOCKED`, `DONE`, `DEFERRED`.
 
 If the ledger is missing, recreate it with current known tasks before proceeding.
+
+## Branch Naming Convention
+When creating feature or fix branches, follow a numeric minor-increment policy derived from the current branch name when that branch uses a numeric suffix. Rules:
+
+1. If the current branch matches the pattern `<name>_<major>` or `dev_<major>` (for example `dev_1`), create the new branch by incrementing the minor version: `dev_<major>.<minor>` where `<minor>` starts at `1` for the first child branch. Example: from `dev_1` → `dev_1.1`.
+2. If multiple child branches already exist, pick the next unused minor (e.g., `dev_1.1`, `dev_1.2`, ...).
+3. Append a short, descriptive suffix after the version separated by a dash, e.g. `dev_1.1-add-ledger`, `feature-2.3-fix-anisotropy`.
+4. If the current branch does not use a numeric suffix, fall back to `feature/<short-desc>` or `fix/<short-desc>`.
+5. Update `.github/copilot-instructions.md` when modifying this policy.
