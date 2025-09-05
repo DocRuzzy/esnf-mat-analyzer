@@ -141,3 +141,16 @@ def analyze_correction_quality(original, corrected, mask=None):
 - **Import errors**: Check recent reorganization - background correction moved to submodule
 
 When working with this codebase, prioritize understanding the background correction pipeline as it's the primary development focus and affects all downstream analysis quality.
+
+## Task Ledger Update Requirement (R-LEDGER-UPDATE)
+An AI-maintained file `task-ledger.md` at the repository root tracks tasks (ID, status, prerequisites, blocking reasons). After every task completion or status change performed via the AI assistant, the assistant MUST:
+1. Update the task's status (e.g., TODO → IN-PROGRESS → DONE).
+2. Add completion date when moving to DONE.
+3. Add or adjust blocking reasons if prerequisites not met.
+4. Append any new tasks created during the change.
+5. Maintain formatting and table integrity.
+6. Ensure this requirement section remains present.
+
+Statuses: `TODO`, `IN-PROGRESS`, `BLOCKED`, `DONE`, `DEFERRED`.
+
+If the ledger is missing, recreate it with current known tasks before proceeding.

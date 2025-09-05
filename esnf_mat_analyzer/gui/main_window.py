@@ -1,4 +1,3 @@
-
 """
 Main GUI window for ESNF Mat Analyzer.
 
@@ -18,8 +17,13 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from esnf_mat_analyzer.main import setup_dependencies
 from esnf_mat_analyzer.visualization.visualization import Visualizer
-from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
+from esnf_mat_analyzer.core.data_types import (
+    VisualizationConfig,
+    BackgroundCorrectionMethod,
+    ThicknessModelType,
+)
 from esnf_mat_analyzer.config.config_manager import get_default_config
+
 
 class MainWindow(tk.Tk):
     def __init__(self):
@@ -40,14 +44,14 @@ class MainWindow(tk.Tk):
         self.drawing_mode = "roi"
         self.spatial_scale = None
         self.last_analysis_result = None
-        
+
         # Image display properties
         self.scale_factor = 1.0
         self.min_scale = 0.1
         self.max_scale = 5.0
         self.canvas_width = 800
         self.canvas_height = 600
-        
+
         # Pan properties
         self.pan_start_x = 0
         self.pan_start_y = 0
@@ -83,39 +87,49 @@ class MainWindow(tk.Tk):
         # Background leveling checkbox
         self.background_leveling_var = tk.BooleanVar(value=True)
         self.background_leveling_checkbox = ttk.Checkbutton(
-            self.analysis_frame, 
-            text="Enable Background Leveling", 
-            variable=self.background_leveling_var
+            self.analysis_frame,
+            text="Enable Background Leveling",
+            variable=self.background_leveling_var,
         )
         self.background_leveling_checkbox.pack(padx=5, pady=2, anchor=tk.W)
-
 
         # Heatmap auto-range checkbox
         self.auto_range_var = tk.BooleanVar(value=True)
         self.auto_range_checkbox = ttk.Checkbutton(
-            self.analysis_frame, 
-            text="Auto-adjust Heatmap Range", 
-            variable=self.auto_range_var
+            self.analysis_frame,
+            text="Auto-adjust Heatmap Range",
+            variable=self.auto_range_var,
         )
         self.auto_range_checkbox.pack(padx=5, pady=2, anchor=tk.W)
 
         # Max coefficients for multiscale uniformity
         max_coeff_frame = ttk.Frame(self.analysis_frame)
         max_coeff_frame.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(max_coeff_frame, text="Max Coefficients (memory limit):").pack(side=tk.LEFT)
+        ttk.Label(max_coeff_frame, text="Max Coefficients (memory limit):").pack(
+            side=tk.LEFT
+        )
         self.max_coeff_var = tk.IntVar(value=100000)
-        self.max_coeff_spinbox = ttk.Spinbox(max_coeff_frame, from_=1000, to=1000000, increment=1000, textvariable=self.max_coeff_var, width=10)
+        self.max_coeff_spinbox = ttk.Spinbox(
+            max_coeff_frame,
+            from_=1000,
+            to=1000000,
+            increment=1000,
+            textvariable=self.max_coeff_var,
+            width=10,
+        )
         self.max_coeff_spinbox.pack(side=tk.LEFT, padx=2)
 
         # Background correction method selection
-        self.bg_method_frame = ttk.LabelFrame(self.analysis_frame, text="Background Correction Method")
+        self.bg_method_frame = ttk.LabelFrame(
+            self.analysis_frame, text="Background Correction Method"
+        )
         self.bg_method_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Add explanation label
         explanation_label = ttk.Label(
-            self.bg_method_frame, 
+            self.bg_method_frame,
             text="Always uses 4-step workflow. Choose illumination modeling method:",
-            font=('TkDefaultFont', 8)
+            font=("TkDefaultFont", 8),
         )
         explanation_label.pack(anchor=tk.W, padx=5, pady=2)
 
@@ -123,7 +137,7 @@ class MainWindow(tk.Tk):
         bg_methods = [
             ("Method 2A: Polynomial Surface (Most Robust)", "polynomial"),
             ("Method 2B: Large Kernel Blur (Simpler)", "large_kernel_blur"),
-            ("None (Skip Background Correction)", "none")
+            ("None (Skip Background Correction)", "none"),
         ]
 
         for text, value in bg_methods:
@@ -132,19 +146,21 @@ class MainWindow(tk.Tk):
                 text=text,
                 variable=self.bg_method_var,
                 value=value,
-                command=self.on_bg_method_change
+                command=self.on_bg_method_change,
             ).pack(anchor=tk.W, padx=5, pady=1)
 
         # Preview button for background methods
         self.preview_bg_button = ttk.Button(
             self.bg_method_frame,
             text="Compare Methods 2A vs 2B",
-            command=self.preview_background_methods
+            command=self.preview_background_methods,
         )
         self.preview_bg_button.pack(padx=5, pady=5)
 
         # Thickness model selection
-        self.thickness_model_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Model")
+        self.thickness_model_frame = ttk.LabelFrame(
+            self.analysis_frame, text="Thickness Model"
+        )
         self.thickness_model_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.thickness_model_var = tk.StringVar(value="beer_lambert")
@@ -152,7 +168,7 @@ class MainWindow(tk.Tk):
             ("Beer-Lambert (Physics)", "beer_lambert"),
             ("Linear", "linear"),
             ("Logarithmic", "logarithmic"),
-            ("Exponential", "exponential")
+            ("Exponential", "exponential"),
         ]
 
         for text, value in thickness_models:
@@ -160,14 +176,14 @@ class MainWindow(tk.Tk):
                 self.thickness_model_frame,
                 text=text,
                 variable=self.thickness_model_var,
-                value=value
+                value=value,
             ).pack(anchor=tk.W, padx=5, pady=1)
 
         # Add model comparison button
         self.compare_models_button = ttk.Button(
             self.thickness_model_frame,
             text="Compare Models",
-            command=self.compare_thickness_models
+            command=self.compare_thickness_models,
         )
         self.compare_models_button.pack(padx=5, pady=5)
 
@@ -177,28 +193,36 @@ class MainWindow(tk.Tk):
         self.analyze_button.pack(padx=5, pady=5)
 
         self.set_scale_button = ttk.Button(
-            self.analysis_frame, text="Set Scale Manually", command=self.set_scale_manually
+            self.analysis_frame,
+            text="Set Scale Manually",
+            command=self.set_scale_manually,
         )
         self.set_scale_button.pack(padx=5, pady=5)
 
         # Image controls
-        self.image_controls_frame = ttk.LabelFrame(self.left_panel, text="Image Controls")
+        self.image_controls_frame = ttk.LabelFrame(
+            self.left_panel, text="Image Controls"
+        )
         self.image_controls_frame.pack(fill=tk.X, pady=5)
 
         # Zoom controls
         zoom_frame = ttk.Frame(self.image_controls_frame)
         zoom_frame.pack(fill=tk.X, padx=5, pady=2)
-        
+
         ttk.Label(zoom_frame, text="Zoom:").pack(side=tk.LEFT)
-        self.zoom_in_button = ttk.Button(zoom_frame, text="+", width=3, command=self.zoom_in)
+        self.zoom_in_button = ttk.Button(
+            zoom_frame, text="+", width=3, command=self.zoom_in
+        )
         self.zoom_in_button.pack(side=tk.LEFT, padx=2)
-        
-        self.zoom_out_button = ttk.Button(zoom_frame, text="-", width=3, command=self.zoom_out)
+
+        self.zoom_out_button = ttk.Button(
+            zoom_frame, text="-", width=3, command=self.zoom_out
+        )
         self.zoom_out_button.pack(side=tk.LEFT, padx=2)
-        
+
         self.fit_button = ttk.Button(zoom_frame, text="Fit", command=self.fit_to_window)
         self.fit_button.pack(side=tk.LEFT, padx=2)
-        
+
         self.reset_button = ttk.Button(zoom_frame, text="100%", command=self.reset_zoom)
         self.reset_button.pack(side=tk.LEFT, padx=2)
 
@@ -207,7 +231,9 @@ class MainWindow(tk.Tk):
         self.scale_label.pack(pady=2)
 
         self.insert_scale_bar_button = ttk.Button(
-            self.image_controls_frame, text="Insert Scale Bar", command=self.insert_scale_bar
+            self.image_controls_frame,
+            text="Insert Scale Bar",
+            command=self.insert_scale_bar,
         )
         self.insert_scale_bar_button.pack(pady=5)
 
@@ -228,14 +254,20 @@ class MainWindow(tk.Tk):
         # Create scrollable canvas
         self.canvas_frame = ttk.Frame(self.image_frame)
         self.canvas_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         self.canvas = tk.Canvas(self.canvas_frame, bg="gray")
-        
+
         # Add scrollbars
-        self.v_scrollbar = ttk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.h_scrollbar = ttk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        self.canvas.configure(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
-        
+        self.v_scrollbar = ttk.Scrollbar(
+            self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview
+        )
+        self.h_scrollbar = ttk.Scrollbar(
+            self.canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview
+        )
+        self.canvas.configure(
+            yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set
+        )
+
         # Pack scrollbars and canvas
         self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
@@ -284,25 +316,25 @@ class MainWindow(tk.Tk):
     def fit_to_window(self):
         if not self.current_image:
             return
-            
+
         # Get canvas dimensions
         self.canvas.update_idletasks()
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
-        
+
         if canvas_width <= 1 or canvas_height <= 1:
             # Canvas not ready yet, try again later
             self.canvas.after(100, self.fit_to_window)
             return
-        
+
         # Calculate scale to fit image in canvas
         img_width, img_height = self.current_image.size
         scale_x = (canvas_width - 20) / img_width  # Leave some margin
         scale_y = (canvas_height - 20) / img_height
-        
+
         self.scale_factor = min(scale_x, scale_y, 1.0)  # Don't scale up initially
         self.scale_factor = max(self.scale_factor, self.min_scale)
-        
+
         self.update_image_display()
 
     def reset_zoom(self):
@@ -326,7 +358,7 @@ class MainWindow(tk.Tk):
     def on_mousewheel(self, event):
         if not self.current_image:
             return
-            
+
         # Zoom in/out with mouse wheel
         if event.delta > 0:
             self.zoom_in()
@@ -340,30 +372,34 @@ class MainWindow(tk.Tk):
     def update_image_display(self):
         if not self.current_image:
             return
-            
+
         # Clear canvas
         self.canvas.delete("all")
-        
+
         # Calculate new image size
         img_width, img_height = self.current_image.size
         new_width = int(img_width * self.scale_factor)
         new_height = int(img_height * self.scale_factor)
-        
+
         # Resize image
         if new_width > 0 and new_height > 0:
-            self.displayed_image = self.current_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            self.displayed_image = self.current_image.resize(
+                (new_width, new_height), Image.Resampling.LANCZOS
+            )
             self.tk_image = ImageTk.PhotoImage(self.displayed_image)
-            
+
             # Display image
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image, tags="image")
-            
+            self.canvas.create_image(
+                0, 0, anchor=tk.NW, image=self.tk_image, tags="image"
+            )
+
             # Update scroll region
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            
+
             # Update scale label
             self.scale_label.config(text=f"Scale: {self.scale_factor*100:.0f}%")
 
-        if hasattr(self, 'scale_bar_length_mm'):
+        if hasattr(self, "scale_bar_length_mm"):
             self.draw_scale_bar()
 
     def start_pan(self, event):
@@ -374,14 +410,14 @@ class MainWindow(tk.Tk):
     def do_pan(self, event):
         if not self.is_panning:
             return
-            
+
         # Calculate how much to pan
         dx = event.x - self.pan_start_x
         dy = event.y - self.pan_start_y
-        
+
         # Pan the canvas
         self.canvas.scan_dragto(event.x, event.y, gain=1)
-        
+
         self.pan_start_x = event.x
         self.pan_start_y = event.y
 
@@ -391,41 +427,55 @@ class MainWindow(tk.Tk):
     def on_button_press(self, event):
         if self.is_panning:
             return
-            
+
         # Convert canvas coordinates to actual coordinates
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
-        
+
         self.start_x = canvas_x
         self.start_y = canvas_y
-        
+
         if self.drawing_mode == "roi":
             if self.rect:
                 self.canvas.delete(self.rect)
             self.rect = self.canvas.create_rectangle(
-                self.start_x, self.start_y, self.start_x, self.start_y,
-                outline="red", width=2, tags="roi"
+                self.start_x,
+                self.start_y,
+                self.start_x,
+                self.start_y,
+                outline="red",
+                width=2,
+                tags="roi",
             )
         elif self.drawing_mode == "scale":
             if self.oval:
                 self.canvas.delete(self.oval)
             self.oval = self.canvas.create_oval(
-                self.start_x, self.start_y, self.start_x, self.start_y,
-                outline="blue", width=2, tags="scale"
+                self.start_x,
+                self.start_y,
+                self.start_x,
+                self.start_y,
+                outline="blue",
+                width=2,
+                tags="scale",
             )
 
     def on_mouse_drag(self, event):
         if self.is_panning or not self.start_x or not self.start_y:
             return
-            
+
         # Convert canvas coordinates to actual coordinates
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
-        
+
         if self.drawing_mode == "roi":
-            self.canvas.coords(self.rect, self.start_x, self.start_y, canvas_x, canvas_y)
+            self.canvas.coords(
+                self.rect, self.start_x, self.start_y, canvas_x, canvas_y
+            )
         elif self.drawing_mode == "scale":
-            self.canvas.coords(self.oval, self.start_x, self.start_y, canvas_x, canvas_y)
+            self.canvas.coords(
+                self.oval, self.start_x, self.start_y, canvas_x, canvas_y
+            )
 
     def on_button_release(self, event):
         if self.is_panning:
@@ -434,14 +484,16 @@ class MainWindow(tk.Tk):
         if self.drawing_mode == "scale":
             self.calculate_scale_from_oval()
 
-        self.drawing_mode = "roi" # Reset drawing mode
+        self.drawing_mode = "roi"  # Reset drawing mode
 
     def insert_scale_bar(self):
         if not self.spatial_scale:
             print("Please set the scale first.")
             return
 
-        length_mm = simpledialog.askfloat("Scale Bar Length", "Enter the length of the scale bar in mm:")
+        length_mm = simpledialog.askfloat(
+            "Scale Bar Length", "Enter the length of the scale bar in mm:"
+        )
         if not length_mm or length_mm <= 0:
             return
 
@@ -449,19 +501,28 @@ class MainWindow(tk.Tk):
         self.draw_scale_bar()
 
     def draw_scale_bar(self):
-        if hasattr(self, 'scale_bar_items'):
+        if hasattr(self, "scale_bar_items"):
             for item in self.scale_bar_items:
                 self.canvas.delete(item)
 
-        length_pixels = self.scale_bar_length_mm * self.spatial_scale * self.scale_factor
+        length_pixels = (
+            self.scale_bar_length_mm * self.spatial_scale * self.scale_factor
+        )
 
         # Position the scale bar at the bottom-left corner
         x = 20
         y = self.canvas.winfo_height() - 20
 
         self.scale_bar_items = []
-        line = self.canvas.create_line(x, y, x + length_pixels, y, fill="white", width=3)
-        text = self.canvas.create_text(x + length_pixels / 2, y - 10, text=f"{self.scale_bar_length_mm} mm", fill="white")
+        line = self.canvas.create_line(
+            x, y, x + length_pixels, y, fill="white", width=3
+        )
+        text = self.canvas.create_text(
+            x + length_pixels / 2,
+            y - 10,
+            text=f"{self.scale_bar_length_mm} mm",
+            fill="white",
+        )
         self.scale_bar_items.extend([line, text])
 
         # Make the scale bar draggable
@@ -491,9 +552,11 @@ class MainWindow(tk.Tk):
             return
 
         x1, y1, x2, y2 = self.canvas.coords(self.oval)
-        diameter_pixels = math.sqrt((x2 - x1)**2 + (y2 - y1)**2) / self.scale_factor
+        diameter_pixels = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) / self.scale_factor
 
-        known_distance = simpledialog.askfloat("Known Distance", "Enter the known distance in mm:")
+        known_distance = simpledialog.askfloat(
+            "Known Distance", "Enter the known distance in mm:"
+        )
 
         if known_distance and known_distance > 0:
             self.spatial_scale = diameter_pixels / known_distance
@@ -508,22 +571,22 @@ class MainWindow(tk.Tk):
 
         # Get ROI from canvas (in scaled coordinates)
         x1, y1, x2, y2 = self.canvas.coords(self.rect)
-        
+
         # Convert scaled coordinates back to original image coordinates
         orig_x1 = int(x1 / self.scale_factor)
         orig_y1 = int(y1 / self.scale_factor)
         orig_x2 = int(x2 / self.scale_factor)
         orig_y2 = int(y2 / self.scale_factor)
-        
+
         # Ensure coordinates are within image bounds
         img_width, img_height = self.current_image.size
         orig_x1 = max(0, min(orig_x1, img_width))
         orig_y1 = max(0, min(orig_y1, img_height))
         orig_x2 = max(0, min(orig_x2, img_width))
         orig_y2 = max(0, min(orig_y2, img_height))
-        
+
         roi = (orig_x1, orig_y1, orig_x2, orig_y2)
-        
+
         print(f"ROI in original coordinates: {roi}")
 
         # Get selected file
@@ -540,12 +603,14 @@ class MainWindow(tk.Tk):
         config.processing.leveling.enabled = self.background_leveling_var.get()
         # Update max_coefficients from GUI
         config.uniformity.max_coefficients = self.max_coeff_var.get()
-        
+
         analyzer = setup_dependencies(config)
 
         # Run analysis
         try:
-            self.last_analysis_result = analyzer.process_image(Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale)
+            self.last_analysis_result = analyzer.process_image(
+                Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale
+            )
             self.display_results(self.last_analysis_result)
         except Exception as e:
             print(f"Error during analysis: {e}")
@@ -564,7 +629,7 @@ class MainWindow(tk.Tk):
         fig = visualizer.create_thickness_heatmap(
             self.last_analysis_result.thickness_map,
             self.last_analysis_result.mask,
-            self.last_analysis_result.saturation_mask
+            self.last_analysis_result.saturation_mask,
         )
 
         # Display the figure in a new window
@@ -598,17 +663,17 @@ class MainWindow(tk.Tk):
             fig = visualizer.create_thickness_heatmap(
                 self.last_analysis_result.thickness_map,
                 self.last_analysis_result.mask,
-                self.last_analysis_result.saturation_mask
+                self.last_analysis_result.saturation_mask,
             )
             fig.canvas.draw()
-            
+
             # Convert matplotlib figure to image
             fig_img = Image.frombytes(
                 "RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb()
             )
             # Here you could blend img and fig_img if needed
             img = fig_img
-            
+
         img.save(filepath)
         print(f"Image saved to {filepath}")
 
@@ -635,7 +700,10 @@ class MainWindow(tk.Tk):
         # Load and preprocess the image
         try:
             import cv2
-            from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
+            from esnf_mat_analyzer.processing.background_correction.advanced import (
+                AdvancedBackgroundProcessor,
+            )
+
             processor = AdvancedBackgroundProcessor()
 
             raw_image = cv2.imread(str(self.current_image_path))
@@ -648,7 +716,7 @@ class MainWindow(tk.Tk):
                 ),
                 "Method 2B: Large Kernel Blur": processor.complete_uniformity_analysis(
                     gray_image, background_method="large_kernel_blur"
-                )
+                ),
             }
 
             for method_name, results in methods.items():
@@ -658,65 +726,83 @@ class MainWindow(tk.Tk):
 
                 # Apply the background correction method
                 try:
-                    corrected_image = results['corrected_image']
-                    
+                    corrected_image = results["corrected_image"]
+
                     # Create side-by-side comparison with workflow steps
                     fig = Figure(figsize=(16, 8))
-                    
+
                     # Original image
                     ax1 = fig.add_subplot(241)
-                    ax1.imshow(gray_image, cmap='gray')
-                    ax1.set_title('1. Original Image')
-                    ax1.axis('off')
-                    
+                    ax1.imshow(gray_image, cmap="gray")
+                    ax1.set_title("1. Original Image")
+                    ax1.axis("off")
+
                     # Background mask
                     ax2 = fig.add_subplot(242)
-                    ax2.imshow(results['background_mask'], cmap='gray')
-                    ax2.set_title('1. Background Mask')
-                    ax2.axis('off')
-                    
+                    ax2.imshow(results["background_mask"], cmap="gray")
+                    ax2.set_title("1. Background Mask")
+                    ax2.axis("off")
+
                     # Estimated background
                     ax3 = fig.add_subplot(243)
-                    ax3.imshow(results['estimated_background'], cmap='viridis')
-                    ax3.set_title('2. Estimated Background')
-                    ax3.axis('off')
-                    
+                    ax3.imshow(results["estimated_background"], cmap="viridis")
+                    ax3.set_title("2. Estimated Background")
+                    ax3.axis("off")
+
                     # Corrected image
                     ax4 = fig.add_subplot(244)
-                    ax4.imshow(corrected_image, cmap='gray')
-                    ax4.set_title('3. Corrected Image')
-                    ax4.axis('off')
-                    
+                    ax4.imshow(corrected_image, cmap="gray")
+                    ax4.set_title("3. Corrected Image")
+                    ax4.axis("off")
+
                     # Add uniformity analysis in bottom row
-                    if 'mat_mask' in results and np.any(results['mat_mask']):
+                    if "mat_mask" in results and np.any(results["mat_mask"]):
                         # Mat mask
                         ax5 = fig.add_subplot(245)
-                        ax5.imshow(results['mat_mask'], cmap='gray')
-                        ax5.set_title('4. Mat Mask')
-                        ax5.axis('off')
-                        
+                        ax5.imshow(results["mat_mask"], cmap="gray")
+                        ax5.set_title("4. Mat Mask")
+                        ax5.axis("off")
+
                         # Histogram comparison
                         ax6 = fig.add_subplot(246)
-                        original_mat = gray_image[results['mat_mask']]
-                        corrected_mat = corrected_image[results['mat_mask']]
-                        ax6.hist(original_mat, bins=50, alpha=0.5, label='Original', density=True)
-                        ax6.hist(corrected_mat, bins=50, alpha=0.5, label='Corrected', density=True)
-                        ax6.set_title('4. Mat Intensity Distribution')
+                        original_mat = gray_image[results["mat_mask"]]
+                        corrected_mat = corrected_image[results["mat_mask"]]
+                        ax6.hist(
+                            original_mat,
+                            bins=50,
+                            alpha=0.5,
+                            label="Original",
+                            density=True,
+                        )
+                        ax6.hist(
+                            corrected_mat,
+                            bins=50,
+                            alpha=0.5,
+                            label="Corrected",
+                            density=True,
+                        )
+                        ax6.set_title("4. Mat Intensity Distribution")
                         ax6.legend()
-                        ax6.set_xlabel('Intensity')
-                        ax6.set_ylabel('Density')
-                    
+                        ax6.set_xlabel("Intensity")
+                        ax6.set_ylabel("Density")
+
                     # Add statistics text
                     stats_text = self._get_complete_workflow_stats(results)
-                    fig.text(0.7, 0.3, stats_text, fontsize=10, verticalalignment='top',
-                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-                    fig.suptitle(f'{method_name}\n{stats_text}', fontsize=10)
-                    
+                    fig.text(
+                        0.7,
+                        0.3,
+                        stats_text,
+                        fontsize=10,
+                        verticalalignment="top",
+                        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                    )
+                    fig.suptitle(f"{method_name}\n{stats_text}", fontsize=10)
+
                     # Embed plot in tab
                     canvas = FigureCanvasTkAgg(fig, tab_frame)
                     canvas.draw()
                     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                    
+
                     # Add selection button
                     if "Polynomial" in method_name:
                         button_method = "polynomial"
@@ -728,7 +814,9 @@ class MainWindow(tk.Tk):
                     select_button = ttk.Button(
                         tab_frame,
                         text=button_text,
-                        command=lambda m=button_method: self._select_bg_method(m, preview_window)
+                        command=lambda m=button_method: self._select_bg_method(
+                            m, preview_window
+                        ),
                     )
                     select_button.pack(pady=10)
 
@@ -743,32 +831,38 @@ class MainWindow(tk.Tk):
     def _get_complete_workflow_stats(self, results):
         """Get statistical summary for complete workflow results."""
         stats_lines = []
-        
+
         # Background mask statistics
-        if 'background_mask' in results:
-            total_pixels = results['background_mask'].size
-            bg_pixels = np.sum(results['background_mask'])
-            stats_lines.append(f"Background pixels: {bg_pixels} ({100*bg_pixels/total_pixels:.1f}%)")
-        
+        if "background_mask" in results:
+            total_pixels = results["background_mask"].size
+            bg_pixels = np.sum(results["background_mask"])
+            stats_lines.append(
+                f"Background pixels: {bg_pixels} ({100*bg_pixels/total_pixels:.1f}%)"
+            )
+
         # Mat uniformity metrics
-        if 'coefficient_of_variation' in results:
-            cv = results['coefficient_of_variation']
-            mean_int = results.get('mean_intensity', 0)
-            std_dev = results.get('std_deviation', 0)
+        if "coefficient_of_variation" in results:
+            cv = results["coefficient_of_variation"]
+            mean_int = results.get("mean_intensity", 0)
+            std_dev = results.get("std_deviation", 0)
             stats_lines.append(f"Mat CV: {cv:.4f}")
             stats_lines.append(f"Mat Mean: {mean_int:.1f} ± {std_dev:.1f}")
-        
+
         # Intensity range
-        if 'corrected_image' in results:
-            corrected = results['corrected_image']
+        if "corrected_image" in results:
+            corrected = results["corrected_image"]
             stats_lines.append(f"Corrected range: {corrected.min()}-{corrected.max()}")
-        
+
         return "\n".join(stats_lines)
 
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""
-        orig_stats = f"Original: {original.min()}-{original.max()}, μ={original.mean():.1f}"
-        corr_stats = f"Corrected: {corrected.min()}-{corrected.max()}, μ={corrected.mean():.1f}"
+        orig_stats = (
+            f"Original: {original.min()}-{original.max()}, μ={original.mean():.1f}"
+        )
+        corr_stats = (
+            f"Corrected: {corrected.min()}-{corrected.max()}, μ={corrected.mean():.1f}"
+        )
         sat_rate = 100 * np.sum(corrected >= 240) / corrected.size
         return f"{orig_stats}\n{corr_stats}\nSaturation: {sat_rate:.1f}%"
 
@@ -776,7 +870,9 @@ class MainWindow(tk.Tk):
         """Select a background correction method and close preview."""
         self.bg_method_var.set(method_id)
         preview_window.destroy()
-        tk.messagebox.showinfo("Selection", f"Background correction method updated to: {method_id}")
+        tk.messagebox.showinfo(
+            "Selection", f"Background correction method updated to: {method_id}"
+        )
 
     def compare_thickness_models(self):
         """Show comparison of different thickness models."""
@@ -786,26 +882,28 @@ class MainWindow(tk.Tk):
 
         try:
             # Quick analysis with current image
-            from esnf_mat_analyzer.processing.physics_based_thickness import MultiModelThicknessEstimator
-            
+            from esnf_mat_analyzer.processing.physics_based_thickness import (
+                MultiModelThicknessEstimator,
+            )
+
             # Convert PIL to numpy
-            img_array = np.array(self.current_image.convert('L'))
-            
+            img_array = np.array(self.current_image.convert("L"))
+
             estimator = MultiModelThicknessEstimator()
             results = estimator.validate_model_performance(img_array)
-            
+
             # Create results window
             results_window = tk.Toplevel(self)
             results_window.title("Thickness Model Comparison")
             results_window.geometry("800x600")
-            
+
             # Create text widget with results
-            text_widget = tk.Text(results_window, wrap=tk.WORD, font=('Courier', 10))
+            text_widget = tk.Text(results_window, wrap=tk.WORD, font=("Courier", 10))
             text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
+
             # Format results
-            comparison_text = "THICKNESS MODEL COMPARISON\n" + "="*50 + "\n\n"
-            
+            comparison_text = "THICKNESS MODEL COMPARISON\n" + "=" * 50 + "\n\n"
+
             for model_name, stats in results.items():
                 comparison_text += f"{model_name.upper()} MODEL:\n"
                 comparison_text += f"  Mean Thickness: {stats['mean_thickness']:.2f}\n"
@@ -813,14 +911,18 @@ class MainWindow(tk.Tk):
                 comparison_text += f"  Dynamic Range: {stats['dynamic_range']:.2f}\n"
                 comparison_text += f"  Signal/Noise: {stats['signal_to_noise']:.2f}\n"
                 comparison_text += f"  Coeff. of Variation: {stats['coefficient_of_variation']:.3f}\n\n"
-            
+
             comparison_text += "\nRECOMMENDATION:\n"
-            comparison_text += "Beer-Lambert model is recommended for physics-based analysis\n"
-            comparison_text += "with improved accuracy for fiber mat thickness estimation.\n"
-            
+            comparison_text += (
+                "Beer-Lambert model is recommended for physics-based analysis\n"
+            )
+            comparison_text += (
+                "with improved accuracy for fiber mat thickness estimation.\n"
+            )
+
             text_widget.insert(tk.END, comparison_text)
             text_widget.config(state=tk.DISABLED)
-            
+
         except Exception as e:
             tk.messagebox.showerror("Error", f"Model comparison failed: {str(e)}")
 
@@ -828,16 +930,16 @@ class MainWindow(tk.Tk):
         """Get ROI coordinates from canvas rectangle."""
         if not self.rect:
             return None
-            
+
         # Get ROI from canvas (in scaled coordinates)
         x1, y1, x2, y2 = self.canvas.coords(self.rect)
-        
+
         # Convert scaled coordinates back to original image coordinates
         orig_x1 = int(x1 / self.scale_factor)
         orig_y1 = int(y1 / self.scale_factor)
         orig_x2 = int(x2 / self.scale_factor)
         orig_y2 = int(y2 / self.scale_factor)
-        
+
         # Ensure coordinates are within image bounds
         if self.current_image:
             img_width, img_height = self.current_image.size
@@ -845,7 +947,7 @@ class MainWindow(tk.Tk):
             orig_y1 = max(0, min(orig_y1, img_height))
             orig_x2 = max(0, min(orig_x2, img_width))
             orig_y2 = max(0, min(orig_y2, img_height))
-        
+
         return (orig_x1, orig_y1, orig_x2, orig_y2)
 
     def analyze(self):
@@ -863,7 +965,7 @@ class MainWindow(tk.Tk):
         try:
             # Create config with selected methods
             config = get_default_config()
-            
+
             # Background correction method
             # Background correction method mapping
             method_mapping = {
@@ -871,28 +973,28 @@ class MainWindow(tk.Tk):
                 "polynomial": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
                 "large_kernel_blur": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
             }
-            
+
             selected_bg_method = self.bg_method_var.get()
             config.processing.background_correction_method = method_mapping.get(
                 selected_bg_method, BackgroundCorrectionMethod.COMPLETE_WORKFLOW
             )
-            
+
             # Store the specific GUI selection for Step 2 method choice
             config.processing.background_step2_method = selected_bg_method
-            
+
             # Thickness model selection
             thickness_mapping = {
                 "beer_lambert": ThicknessModelType.BEER_LAMBERT,
                 "linear": ThicknessModelType.LINEAR,
                 "logarithmic": ThicknessModelType.LOGARITHMIC,
-                "exponential": ThicknessModelType.EXPONENTIAL
+                "exponential": ThicknessModelType.EXPONENTIAL,
             }
-            
+
             selected_thickness_model = self.thickness_model_var.get()
             config.thickness.model_type = thickness_mapping.get(
                 selected_thickness_model, ThicknessModelType.BEER_LAMBERT
             )
-            
+
             # Apply other settings
             config.processing.leveling.enabled = self.background_leveling_var.get()
 
@@ -908,7 +1010,9 @@ class MainWindow(tk.Tk):
             analyzer = setup_dependencies(config)
 
             # Run analysis
-            print(f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}")
+            print(
+                f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}"
+            )
             self.last_analysis_result = analyzer.process_image(
                 Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale
             )
@@ -920,6 +1024,7 @@ class MainWindow(tk.Tk):
         except Exception as e:
             print(f"Analysis failed: {e}")
             import traceback
+
             traceback.print_exc()
 
     def export_image(self):
@@ -938,7 +1043,9 @@ class MainWindow(tk.Tk):
         # Create an image from the current display
         try:
             # Simple export of the current image for now
-            pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
+            pil_image = Image.fromarray(
+                cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB)
+            )
             pil_image.save(filepath)
             print(f"Image saved to {filepath}")
         except Exception as e:
@@ -957,7 +1064,7 @@ class MainWindow(tk.Tk):
         # Basic Results Tab
         basic_frame = ttk.Frame(notebook)
         notebook.add(basic_frame, text="Basic Metrics")
-        
+
         basic_text = tk.Text(basic_frame, wrap=tk.WORD)
         basic_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -965,96 +1072,119 @@ class MainWindow(tk.Tk):
         basic_result = f"Image: {result.image_path}\n"
         basic_result += f"Processing Time: {result.processing_time:.2f}s\n"
         if result.spatial_scale_pixels_per_mm:
-            basic_result += f"Spatial Scale: {result.spatial_scale_pixels_per_mm:.2f} pixels/mm\n"
-        
+            basic_result += (
+                f"Spatial Scale: {result.spatial_scale_pixels_per_mm:.2f} pixels/mm\n"
+            )
+
         basic_result += "\nTraditional Uniformity Metrics:\n"
-        traditional_metrics = {k: v for k, v in result.metrics.items() 
-                             if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))}
+        traditional_metrics = {
+            k: v
+            for k, v in result.metrics.items()
+            if not k.startswith(
+                ("anisotropy_", "texture_", "psd_", "overall_mat_uniformity")
+            )
+        }
         for name, value in traditional_metrics.items():
             if isinstance(value, float) and not math.isnan(value):
                 basic_result += f"  {name}: {value:.4f}\n"
             else:
                 basic_result += f"  {name}: {value}\n"
-        
+
         basic_text.insert(tk.END, basic_result)
         basic_text.config(state=tk.DISABLED)
 
         # Mat-Scale Analysis Tab
         mat_frame = ttk.Frame(notebook)
         notebook.add(mat_frame, text="Mat-Scale Analysis")
-        
+
         mat_text = tk.Text(mat_frame, wrap=tk.WORD)
         mat_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Format mat-scale results
         mat_result = "Mat-Scale Uniformity Analysis\n"
         mat_result += "=" * 40 + "\n\n"
-        
+
         # Overall mat uniformity score
-        if 'overall_mat_uniformity' in result.metrics:
-            score = result.metrics['overall_mat_uniformity']
+        if "overall_mat_uniformity" in result.metrics:
+            score = result.metrics["overall_mat_uniformity"]
             if isinstance(score, float) and not math.isnan(score):
                 mat_result += f"Overall Mat Uniformity Score: {score:.4f}\n"
-                mat_result += f"Uniformity Rating: {self._get_uniformity_rating(score)}\n\n"
-        
+                mat_result += (
+                    f"Uniformity Rating: {self._get_uniformity_rating(score)}\n\n"
+                )
+
         # Anisotropy metrics
-        anisotropy_metrics = {k: v for k, v in result.metrics.items() if k.startswith('anisotropy_')}
+        anisotropy_metrics = {
+            k: v for k, v in result.metrics.items() if k.startswith("anisotropy_")
+        }
         if anisotropy_metrics:
             mat_result += "FFT-Based Anisotropy Analysis:\n"
             mat_result += "-" * 30 + "\n"
             for name, value in anisotropy_metrics.items():
-                clean_name = name.replace('anisotropy_', '').replace('_', ' ').title()
+                clean_name = name.replace("anisotropy_", "").replace("_", " ").title()
                 if isinstance(value, float) and not math.isnan(value):
                     mat_result += f"  {clean_name}: {value:.4f}\n"
                 else:
                     mat_result += f"  {clean_name}: {value}\n"
             mat_result += "\n"
-        
+
         # Texture metrics
-        texture_metrics = {k: v for k, v in result.metrics.items() if k.startswith('texture_')}
+        texture_metrics = {
+            k: v for k, v in result.metrics.items() if k.startswith("texture_")
+        }
         if texture_metrics:
             mat_result += "GLCM Texture Analysis:\n"
             mat_result += "-" * 25 + "\n"
             for name, value in texture_metrics.items():
-                clean_name = name.replace('texture_', '').replace('_', ' ').title()
+                clean_name = name.replace("texture_", "").replace("_", " ").title()
                 if isinstance(value, float) and not math.isnan(value):
                     mat_result += f"  {clean_name}: {value:.4f}\n"
                 else:
                     mat_result += f"  {clean_name}: {value}\n"
             mat_result += "\n"
-        
+
         # Power spectral density metrics
-        psd_metrics = {k: v for k, v in result.metrics.items() if k.startswith('psd_')}
+        psd_metrics = {k: v for k, v in result.metrics.items() if k.startswith("psd_")}
         if psd_metrics:
             mat_result += "Power Spectral Density Analysis:\n"
             mat_result += "-" * 35 + "\n"
             for name, value in psd_metrics.items():
-                clean_name = name.replace('psd_', '').replace('_', ' ').title()
+                clean_name = name.replace("psd_", "").replace("_", " ").title()
                 if isinstance(value, float) and not math.isnan(value):
                     mat_result += f"  {clean_name}: {value:.4f}\n"
                 else:
                     mat_result += f"  {clean_name}: {value}\n"
-        
+
         # Multiscale uniformity metrics
-        scale_metrics = {k: v for k, v in result.metrics.items() if k.startswith('scale_') and k.endswith('_uniformity')}
+        scale_metrics = {
+            k: v
+            for k, v in result.metrics.items()
+            if k.startswith("scale_") and k.endswith("_uniformity")
+        }
         if scale_metrics:
             mat_result += "Multiscale Uniformity Analysis:\n"
             mat_result += "-" * 35 + "\n"
             for name, value in sorted(scale_metrics.items()):
-                scale_level = name.replace('scale_', '').replace('_uniformity', '')
+                scale_level = name.replace("scale_", "").replace("_uniformity", "")
                 if isinstance(value, float) and not math.isnan(value):
                     mat_result += f"  Scale Level {scale_level}: {value:.4f}\n"
                 else:
                     mat_result += f"  Scale Level {scale_level}: {value}\n"
-            
+
             # Calculate overall multiscale score
-            valid_values = [v for v in scale_metrics.values() if isinstance(v, float) and not math.isnan(v)]
+            valid_values = [
+                v
+                for v in scale_metrics.values()
+                if isinstance(v, float) and not math.isnan(v)
+            ]
             if valid_values:
                 overall_multiscale = np.mean(valid_values)
-                mat_result += f"\n  Overall Multiscale Uniformity: {overall_multiscale:.4f}\n"
+                mat_result += (
+                    f"\n  Overall Multiscale Uniformity: {overall_multiscale:.4f}\n"
+                )
                 mat_result += f"  Multiscale Rating: {self._get_uniformity_rating(overall_multiscale)}\n"
             mat_result += "\n"
-        
+
         # Add interpretation guide
         mat_result += "\n" + "=" * 40 + "\n"
         mat_result += "Interpretation Guide:\n"
@@ -1065,7 +1195,7 @@ class MainWindow(tk.Tk):
         mat_result += "- Contrast: Lower values indicate smoother texture\n"
         mat_result += "- PSD Uniformity: Higher values indicate more uniform frequency distribution\n"
         mat_result += "- Multiscale Uniformity: Higher values indicate better uniformity at different length scales\n"
-        
+
         mat_text.insert(tk.END, mat_result)
         mat_text.config(state=tk.DISABLED)
 
@@ -1087,20 +1217,22 @@ def main():
     """Entry point for the GUI application."""
     import sys
     from pathlib import Path
-    
+
     # Add project root to path if needed
     project_root = Path(__file__).parent.parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    
+
     try:
         app = MainWindow()
         app.mainloop()
     except Exception as e:
         print(f"Error starting ESNF Mat Analyzer GUI: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
