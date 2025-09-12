@@ -23,12 +23,26 @@ class GrayscaleConversionMethod(Enum):
 
 
 class BackgroundCorrectionMethod(Enum):
-    """Methods for background correction."""
+    """
+    Methods for Step 2 of the scientific background correction workflow.
+    
+    This enum represents the choice of illumination modeling method within
+    the complete 4-step process described in the guide:
+    
+    Step 1: Isolate Background Pixels (automatic)
+    Step 2: Model Uneven Illumination (choice of method below)  
+    Step 3: Correct Image (automatic division)
+    Step 4: Analyze Mat Uniformity (automatic)
+
+    - NONE: Skip background correction entirely
+    - POLYNOMIAL_SURFACE: 2D polynomial surface fitting (Method A - Most Robust)
+    - LARGE_KERNEL_BLUR: Large-kernel blurring (Method B - Simpler Alternative)
+    - COMPLETE_WORKFLOW: Use the full 4-step process with polynomial fitting
+    """
     NONE = auto()
-    BASIC = auto()
-    ROLLING_BALL = auto()
-    RESTORE = auto()
-    HOMOMORPHIC = auto()
+    POLYNOMIAL_SURFACE = auto()
+    LARGE_KERNEL_BLUR = auto()
+    COMPLETE_WORKFLOW = auto()
 
 class ThicknessModelType(Enum):
     """Models for converting brightness to thickness."""
