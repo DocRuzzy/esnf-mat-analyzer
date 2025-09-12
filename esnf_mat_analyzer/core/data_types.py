@@ -1,9 +1,31 @@
 """
-Core data types for the ESNF Mat Analyzer.
+Core data types and configuration structures for the ESNF Mat Analyzer.
 
-This module defines data structures used throughout the system, including
-configuration settings and analysis results. Most data structures are
-implemented as dataclasses for simplicity and type safety.
+This module defines comprehensive data structures used throughout the electrospun
+nanofiber mat analysis system, including configuration settings, analysis results,
+and intermediate data containers. All structures implement validation and type
+safety to ensure robust operation in scientific analysis workflows.
+
+The module provides:
+- Configuration classes for all analysis components
+- Enumeration types for method selection
+- Result containers with validation
+- Type hints for enhanced code safety
+
+Classes:
+    Config: Main configuration container
+    AnalysisResult: Container for analysis outputs
+    RadialProfile: Radial analysis data structure
+    Various *Config classes: Component-specific configurations
+
+Enums:
+    GrayscaleConversionMethod: RGB to grayscale conversion methods
+    BackgroundCorrectionMethod: Background correction algorithms
+    ThicknessModelType: Thickness estimation models
+
+Author: ESNF Mat Analyzer Team
+License: MIT
+Version: 1.0.0
 """
 
 from dataclasses import dataclass, field
@@ -15,7 +37,14 @@ from enum import Enum, auto
 
 
 class GrayscaleConversionMethod(Enum):
-    """Methods for converting RGB images to grayscale."""
+    """
+    Methods for converting RGB images to grayscale.
+    
+    Each method balances different aspects of the original color information:
+    - WEIGHTED: Standard perceptually-weighted conversion (0.299R + 0.587G + 0.114B)
+    - AVERAGE: Simple arithmetic mean of RGB channels
+    - LUMINANCE: CIE luminance formula for accurate brightness perception
+    """
 
     WEIGHTED = auto()  # Standard weighted conversion (default in OpenCV)
     AVERAGE = auto()  # Simple average of channels
@@ -23,20 +52,43 @@ class GrayscaleConversionMethod(Enum):
 
 
 class BackgroundCorrectionMethod(Enum):
-    """Methods for background correction."""
+    """
+    Methods for Step 2 of the scientific background correction workflow.
+    
+    This enum represents the choice of illumination modeling method within
+    the complete 4-step process described in the guide:
+    
+    Step 1: Isolate Background Pixels (automatic)
+    Step 2: Model Uneven Illumination (choice of method below)  
+    Step 3: Correct Image (automatic division)
+    Step 4: Analyze Mat Uniformity (automatic)
+
+    - NONE: Skip background correction entirely
+    - POLYNOMIAL_SURFACE: 2D polynomial surface fitting (Method A - Most Robust)
+    - LARGE_KERNEL_BLUR: Large-kernel blurring (Method B - Simpler Alternative)
+    - COMPLETE_WORKFLOW: Use the full 4-step process with polynomial fitting
+    """
     NONE = auto()
-    BASIC = auto()
-    ROLLING_BALL = auto()
-    RESTORE = auto()
-    HOMOMORPHIC = auto()
+    POLYNOMIAL_SURFACE = auto()
+    LARGE_KERNEL_BLUR = auto()
+    COMPLETE_WORKFLOW = auto()
+
 
 class ThicknessModelType(Enum):
-    """Models for converting brightness to thickness."""
+    """
+    Models for converting image brightness/transmittance to physical thickness.
+    
+    Each model represents different physical assumptions about light-matter interaction:
+    - LINEAR: Direct linear relationship (thickness ∝ intensity)
+    - LOGARITHMIC: Logarithmic relationship for nonlinear opacity effects
+    - EXPONENTIAL: Exponential decay model for high absorption materials
+    - BEER_LAMBERT: Physics-based Beer-Lambert law for accurate thickness estimation
+    """
 
     LINEAR = auto()  # Linear model: thickness = a * brightness + b
     LOGARITHMIC = auto()  # Log model: thickness = a * log(1 + brightness) + b
     EXPONENTIAL = auto()  # Exp model: thickness = a * (exp(brightness / 255) - 1) + b
-    BEER_LAMBERT = auto()
+    BEER_LAMBERT = auto()  # Beer-Lambert law: I = I₀ * exp(-α * t)
 
 
 @dataclass
@@ -157,38 +209,21 @@ class ThicknessConfig:
 
 
 @dataclass
+
+@dataclass
 class UniformityConfig:
     """Configuration parameters for uniformity analysis."""
 
     num_radial_lines: int = 36
-    """Number of radial lines for radial uniformity analysis."""
-
     bin_count: int = 50
-    """Number of bins for histograms."""
-
     smoothing_factor: float = 0.5
-    """Factor for smoothing radial profiles (0.0 to 1.0)."""
-
     min_thickness_percentile: float = 5.0
-    """Percentile to use for minimum thickness in range calculations."""
-
     max_thickness_percentile: float = 95.0
-    """Percentile to use for maximum thickness in range calculations."""
-
     ignore_saturated: bool = True
-    """Whether to exclude saturated pixels from uniformity calculations."""
-
-    glcm_distances: List[int] = field(default_factory=lambda: [1, 2, 4])
-    """Distances for GLCM calculation."""
-
-    glcm_angles: List[float] = field(default_factory=lambda: [0, np.pi/4, np.pi/2, 3*np.pi/4])
-    """Angles for GLCM calculation."""
-
     lbp_radius: int = 1
-    """Radius for LBP calculation."""
-
     lbp_points: int = 8
-    """Number of points for LBP calculation."""
+    max_coefficients: int = 100000
+    """Maximum number of coefficients to use per scale in multiscale uniformity (prevents OOM)."""
 
 
 @dataclass
@@ -227,6 +262,24 @@ class VisualizationConfig:
 
 
 @dataclass
+class RulerScoringConfig:
+    """Parameters for the scoring-based ruler body detection model."""
+    enabled: bool = True
+    """Enable or disable the scoring-based model in favor of the legacy model."""
+    min_thickness_px: int = 5
+    """Minimum plausible thickness for a ruler body in pixels."""
+    max_thickness_px: int = 50
+    """Maximum plausible thickness for a ruler body in pixels."""
+    length_weight: float = 1.0
+    """Weight for the combined length of the ruler lines in the score."""
+    overlap_weight: float = 1.5
+    """Weight for the horizontal overlap of the ruler lines in the score."""
+    tick_count_weight: float = 3.0
+    """Weight for the number of detected ticks between the lines in the score."""
+    parallelism_penalty: float = 2.0
+    """Penalty multiplier for lines that are not parallel."""
+
+@dataclass
 class RulerDetectionConfig:
     """Configuration parameters for ruler detection and scale calibration."""
 
@@ -251,6 +304,65 @@ class RulerDetectionConfig:
     hough_threshold: int = 20
     """Accumulator threshold parameter for Hough Line Transform."""
 
+    min_tick_separation_px: int = 5
+    """Minimum pixel distance between two adjacent ticks to be considered distinct."""
+
+    tick_y_tolerance_factor: float = 1.5
+    """Factor to extend the search for ticks vertically beyond the ruler body (e.g., 1.5 means 150% of ruler thickness)."""
+
+    min_tick_length_factor: float = 0.3
+    """Minimum length of a tick as a factor of the ruler's thickness."""
+
+    abs_min_tick_length_px: int = 5
+    """Absolute minimum length of a tick in pixels, overrides the factor if larger."""
+
+    max_tick_length_factor: float = 4.0
+    """Maximum length of a tick as a factor of the ruler's thickness."""
+
+    scoring: RulerScoringConfig = field(default_factory=RulerScoringConfig)
+    """Configuration for the scoring-based ruler detection model."""
+
+    use_deep_gp: bool = False
+    """Whether to use the DeepGP model for scale calculation."""
+
+    deep_gp_model_path: Optional[str] = None
+    """Path to the trained DeepGP model weights file."""
+
+
+@dataclass
+class Tick:
+    """Represents a single detected tick mark on a ruler."""
+    x_position: float
+    """The x-coordinate of the tick mark in the image."""
+    line: np.ndarray
+    """The (x1, y1, x2, y2) coordinates of the line segment forming the tick."""
+
+@dataclass
+class Ruler:
+    """
+    Represents a detected ruler, its components, and the calculated scale.
+
+    This data structure holds all information related to a ruler found in an
+    image, making it easier to pass this information between different parts of
+    the analysis pipeline.
+    """
+    body_lines: Tuple[np.ndarray, np.ndarray]
+    """A tuple containing the two main parallel lines that form the ruler's body."""
+
+    ticks: List[Tick]
+    """A list of `Tick` objects detected on the ruler."""
+
+    scale_px_per_mm: Optional[float]
+    """The calculated scale in pixels per millimeter. None if calculation failed."""
+
+    mask: np.ndarray
+    """A boolean numpy array with the same dimensions as the image, where True
+    indicates the area occupied by the detected ruler."""
+
+    roi: Tuple[int, int, int, int]
+    """The bounding box (x_start, y_start, x_end, y_end) of the region where the
+    ruler was detected."""
+
 
 @dataclass
 class ExportConfig:
@@ -272,36 +384,15 @@ class ExportConfig:
 @dataclass
 class Config:
     """Main configuration container."""
-
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
-    """Image processing configuration."""
-
     shape_detection: ShapeDetectionConfig = field(default_factory=ShapeDetectionConfig)
-    """Shape detection configuration."""
-
     thickness: ThicknessConfig = field(default_factory=ThicknessConfig)
-    """Thickness estimation configuration."""
-
     uniformity: UniformityConfig = field(default_factory=UniformityConfig)
-    """Uniformity analysis configuration."""
-
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
-    """Visualization configuration."""
-
     ruler_detection: RulerDetectionConfig = field(default_factory=RulerDetectionConfig)
-    """Ruler detection configuration."""
-
     export: ExportConfig = field(default_factory=ExportConfig)
-    """Export configuration."""
-
-    output_dir: Path = Path("./output")
-    """Directory for saving results."""
-
-    log_level: int = logging.INFO
-    """Logging level."""
-
-    cache_intermediates: bool = True
-    """Whether to cache intermediate results."""
+    output_dir: str = "output"
+    log_level: str = "INFO"
 
 
 @dataclass
@@ -341,43 +432,242 @@ class RadialProfile:
 
 @dataclass
 class AnalysisResult:
-    """Container for analysis results."""
+    """
+    Comprehensive container for nanofiber mat analysis results.
+    
+    This class encapsulates all outputs from the analysis pipeline including
+    quantitative metrics, intermediate data products, and metadata necessary
+    for result interpretation and reproducibility.
+    
+    The container includes validation to ensure data consistency and provides
+    utility methods for result interpretation and export preparation.
+    
+    Attributes:
+        image_path: Path to the original input image
+        contour: Detected boundary contour of the nanofiber mat
+        thickness_map: 2D array of estimated thickness values
+        mask: Binary mask defining the region of interest
+        saturation_mask: Binary mask identifying saturated pixels
+        metrics: Dictionary of computed uniformity and quality metrics
+        radial_profile: Radial analysis data if computed
+        spatial_scale_pixels_per_mm: Spatial calibration factor
+        results_dir: Directory containing exported result files
+        processing_time: Total analysis time in seconds
+        metadata: Additional analysis metadata and parameters
+        
+    Examples:
+        >>> result = analyzer.process_image("sample.tif")
+        >>> print(f"Overall uniformity: {result.get_metric('overall_mat_uniformity'):.3f}")
+        >>> print(f"Processing took {result.processing_time:.2f} seconds")
+        >>> 
+        >>> # Check for saturated regions
+        >>> if result.has_saturation():
+        ...     print(f"Warning: {result.saturation_percentage():.1f}% of pixels are saturated")
+        >>>
+        >>> # Export summary
+        >>> summary = result.get_summary()
+        >>> print(summary)
+    """
 
     image_path: Path
-    """Path to the original image."""
+    """Path to the original image file."""
 
     contour: np.ndarray
-    """Detected contour of the mat."""
+    """Detected contour of the nanofiber mat as (N, 1, 2) array."""
 
     thickness_map: np.ndarray
-    """Estimated thickness map."""
+    """2D array of estimated thickness values in configured units."""
 
     mask: np.ndarray
-    """Binary mask of the region of interest."""
+    """Binary mask of the region of interest (True = foreground)."""
 
     saturation_mask: Optional[np.ndarray] = None
-    """Binary mask of saturated pixels."""
+    """Binary mask identifying saturated pixels (True = saturated)."""
 
     metrics: Dict[str, float] = field(default_factory=dict)
-    """Dictionary of uniformity metrics."""
+    """Dictionary of computed uniformity and analysis metrics."""
 
     radial_profile: Optional[RadialProfile] = None
-    """Radial profile data if calculated."""
+    """Radial profile analysis data if computed."""
 
-    spatial_scale_pixels_per_mm: Optional[float] = None # <<< NEW FIELD
+    spatial_scale_pixels_per_mm: Optional[float] = None
+    """Spatial calibration factor (pixels per millimeter)."""
 
     results_dir: Optional[Path] = None
-    """Directory containing result files."""
+    """Directory containing exported result files."""
 
     processing_time: float = 0.0
-    """Time taken for analysis in seconds."""
+    """Total analysis time in seconds."""
 
     metadata: Dict[str, Any] = field(default_factory=dict)
-    """Additional metadata."""
+    """Additional analysis metadata and configuration parameters."""
 
-    def __post_init__(self):
-        """Validate the analysis result."""
-        if hasattr(self, 'thickness_map') and hasattr(self, 'mask') and \
-               self.thickness_map.shape != self.mask.shape:
-                # Check existence of attributes because of potential partial mock objects in tests
-            raise ValueError("Thickness map and mask must have the same shape")
+    def __post_init__(self) -> None:
+        """
+        Validate the analysis result data consistency.
+        
+        Raises:
+            ValueError: If data shapes are inconsistent or values are invalid
+            TypeError: If data types are incorrect
+        """
+        # Validate required attributes exist and have correct types
+        if not isinstance(self.image_path, Path):
+            raise TypeError("image_path must be a Path object")
+            
+        if not isinstance(self.thickness_map, np.ndarray):
+            raise TypeError("thickness_map must be a numpy array")
+            
+        if not isinstance(self.mask, np.ndarray):
+            raise TypeError("mask must be a numpy array")
+            
+        # Validate shape consistency
+        if self.thickness_map.shape != self.mask.shape:
+            raise ValueError(
+                f"Thickness map shape {self.thickness_map.shape} must match "
+                f"mask shape {self.mask.shape}"
+            )
+            
+        # Validate saturation mask if present
+        if self.saturation_mask is not None:
+            if self.saturation_mask.shape != self.mask.shape:
+                raise ValueError(
+                    f"Saturation mask shape {self.saturation_mask.shape} must match "
+                    f"mask shape {self.mask.shape}"
+                )
+                
+        # Validate processing time
+        if self.processing_time < 0:
+            raise ValueError("processing_time cannot be negative")
+            
+        # Validate spatial scale if present
+        if self.spatial_scale_pixels_per_mm is not None:
+            if self.spatial_scale_pixels_per_mm <= 0:
+                raise ValueError("spatial_scale_pixels_per_mm must be positive")
+    
+    def get_metric(self, metric_name: str, default: Optional[float] = None) -> Optional[float]:
+        """
+        Safely retrieve a metric value by name.
+        
+        Args:
+            metric_name: Name of the metric to retrieve
+            default: Default value if metric not found
+            
+        Returns:
+            Metric value or default if not found
+            
+        Examples:
+            >>> uniformity = result.get_metric('overall_mat_uniformity', 0.0)
+            >>> anisotropy = result.get_metric('anisotropy_index')
+        """
+        return self.metrics.get(metric_name, default)
+    
+    def has_saturation(self) -> bool:
+        """
+        Check if the analysis detected any saturated pixels.
+        
+        Returns:
+            True if saturated pixels were detected, False otherwise
+        """
+        return (self.saturation_mask is not None and 
+                np.any(self.saturation_mask))
+    
+    def saturation_percentage(self) -> float:
+        """
+        Calculate the percentage of pixels that are saturated within the ROI.
+        
+        Returns:
+            Percentage of saturated pixels (0-100)
+        """
+        if not self.has_saturation():
+            return 0.0
+            
+        roi_pixels = np.sum(self.mask)
+        saturated_pixels = np.sum(self.saturation_mask & self.mask)
+        
+        return (saturated_pixels / roi_pixels) * 100.0 if roi_pixels > 0 else 0.0
+    
+    def get_physical_scale(self) -> Optional[str]:
+        """
+        Get a string representation of the physical scale if available.
+        
+        Returns:
+            Scale description string or None if no scale available
+            
+        Examples:
+            >>> scale = result.get_physical_scale()
+            >>> print(f"Image scale: {scale}")
+            Image scale: 50.2 pixels/mm (0.020 mm/pixel)
+        """
+        if self.spatial_scale_pixels_per_mm is None:
+            return None
+            
+        mm_per_pixel = 1.0 / self.spatial_scale_pixels_per_mm
+        return (f"{self.spatial_scale_pixels_per_mm:.1f} pixels/mm "
+                f"({mm_per_pixel:.3f} mm/pixel)")
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """
+        Generate a comprehensive summary of the analysis results.
+        
+        Returns:
+            Dictionary containing key result information
+            
+        Examples:
+            >>> summary = result.get_summary()
+            >>> for key, value in summary.items():
+            ...     print(f"{key}: {value}")
+        """
+        summary = {
+            "image_file": self.image_path.name,
+            "processing_time_sec": round(self.processing_time, 2),
+            "roi_area_pixels": int(np.sum(self.mask)),
+            "has_spatial_scale": self.spatial_scale_pixels_per_mm is not None,
+            "has_saturation": self.has_saturation(),
+            "metric_count": len(self.metrics),
+        }
+        
+        if self.spatial_scale_pixels_per_mm is not None:
+            summary["spatial_scale"] = self.get_physical_scale()
+            
+        if self.has_saturation():
+            summary["saturation_percentage"] = round(self.saturation_percentage(), 1)
+            
+        # Add key metrics if available
+        key_metrics = [
+            'overall_mat_uniformity',
+            'anisotropy_index', 
+            'texture_energy',
+            'radial_uniformity_index',
+            'total_relative_roughness'
+        ]
+        
+        for metric in key_metrics:
+            value = self.get_metric(metric)
+            if value is not None:
+                summary[metric] = round(value, 4)
+        
+        return summary
+    
+    def validate_completeness(self) -> List[str]:
+        """
+        Validate result completeness and return any warnings.
+        
+        Returns:
+            List of warning messages for incomplete or problematic results
+        """
+        warnings = []
+        
+        if not self.metrics:
+            warnings.append("No metrics calculated")
+            
+        if self.saturation_percentage() > 10.0:
+            warnings.append(f"High saturation: {self.saturation_percentage():.1f}%")
+            
+        if self.spatial_scale_pixels_per_mm is None:
+            warnings.append("No spatial scale detected - results are in pixel units")
+            
+        roi_area = np.sum(self.mask)
+        if roi_area < 1000:  # Minimum reasonable ROI size
+            warnings.append(f"Small ROI detected: {roi_area} pixels")
+            
+        return warnings

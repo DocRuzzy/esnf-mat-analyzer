@@ -2,7 +2,28 @@ import numpy as np
 from ..core.interfaces import UniformityMetricInterface
 
 class FrequencyAnalyzer(UniformityMetricInterface):
-    """FFT-based anisotropy and spatial frequency analysis."""
+    """FFT-based anisotropy and spatial frequency analysis.
+
+    Implements the UniformityMetricInterface so it can be used seamlessly
+    in pipelines expecting a metric calculator. The primary metric exposed
+    via the generic calculate() method is the anisotropy index.
+    """
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return "frequency_anisotropy"
+
+    @property
+    def description(self) -> str:  # type: ignore[override]
+        return "Anisotropy index derived from radial variance of FFT magnitude spectrum (higher = more anisotropy)."
+
+    def calculate(self, thickness_map: np.ndarray, mask: np.ndarray, center) -> float:  # type: ignore[override]
+        # Mask the map to avoid background influence
+        try:
+            region = np.where(mask, thickness_map, 0)
+        except Exception:
+            region = thickness_map
+        return float(self.calculate_anisotropy_index(region))
 
     def calculate_anisotropy_index(self, thickness_map: np.ndarray) -> float:
         """
@@ -36,10 +57,17 @@ class FrequencyAnalyzer(UniformityMetricInterface):
         PSD analysis with Tukey windowing.
         PSD(kx,ky) = (1/A)|W(kx,ky)|²/Δkx·Δky
         """
-        from scipy.signal.windows import tukey
-
-        # Apply a Tukey window to the image
-        window = tukey(thickness_map.shape[0], alpha=0.5)
+        # Try to import Tukey window; fall back to simple Hann window if scipy missing
+        try:  # pragma: no cover - optional dependency branch
+            from scipy.signal.windows import tukey  # type: ignore
+            window = tukey(thickness_map.shape[0], alpha=0.5)
+        except Exception:
+            n = thickness_map.shape[0]
+            if n > 1:
+                x = np.arange(n)
+                window = 0.5 - 0.5 * np.cos(2 * np.pi * x / (n - 1))  # Hann window
+            else:
+                window = np.ones(n, dtype=float)
         windowed_image = thickness_map * window[:, np.newaxis] * window[np.newaxis, :]
 
         # Perform 2D FFT

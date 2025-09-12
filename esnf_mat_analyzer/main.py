@@ -1,5 +1,9 @@
+
 """
 Main application module for nanofiber thickness uniformity analysis.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
 
 This module provides the entry point for the application and dependency injection setup.
 """
@@ -119,6 +123,7 @@ def create_config(config_data: Dict[str, Any] = None) -> Config:
         num_radial_lines=config_data.get("uniformity", {}).get("num_radial_lines", 36),
         bin_count=config_data.get("uniformity", {}).get("bin_count", 50),
         smoothing_factor=config_data.get("uniformity", {}).get("smoothing_factor", 0.5),
+        max_coefficients=config_data.get("uniformity", {}).get("max_coefficients", 100000),
     )
 
     # Create visualization config
@@ -273,8 +278,8 @@ def generate_default_config(output_path: Path) -> None:
         yaml.dump(config_dict, f, default_flow_style=False)
 
 
-def main():
-    """Main entry point for the application."""
+def cli_main():
+    """Main entry point for the command-line interface."""
     # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Analyze nanofiber thickness uniformity from images."
@@ -371,6 +376,24 @@ def main():
         return 1
 
     return 0
+
+
+def main():
+    """
+    Main entry point that delegates to the professional CLI.
+    
+    This function provides backward compatibility while directing users
+    to the enhanced CLI interface with better error handling, progress
+    tracking, and professional output formatting.
+    """
+    try:
+        from .cli.main import main_cli
+        return main_cli()
+    except ImportError:
+        # Fallback to basic CLI if professional CLI dependencies unavailable
+        print("Warning: Professional CLI dependencies not available. Using basic CLI.")
+        print("Install optional dependencies with: pip install colorama tqdm")
+        return cli_main()
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import numpy as np # For dummy image data if needed by mocks
 from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
 from esnf_mat_analyzer.core.data_types import (
     Config, AnalysisResult, ProcessingConfig,
-    ThicknessConfig, UniformityConfig, VisualizationConfig, ExportConfig,
+    ThicknessConfig, UniformityConfig, VisualizationConfig, ExportConfig, 
     RulerDetectionConfig
 )
 # Interfaces for mocking
@@ -30,7 +30,7 @@ def mock_config() -> Config:
         export=ExportConfig(),
         ruler_detection=RulerDetectionConfig(enabled=True), # Ruler detection enabled by default for some tests
         output_dir=Path("./test_output"),
-        log_level="DEBUG"
+        log_level="DEBUG" 
     )
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def mock_data_exporter() -> MagicMock:
 
 @pytest.fixture
 def analyzer(mock_config, mock_image_processor, mock_shape_detector,
-             mock_thickness_estimator, mock_ruler_detector,
+             mock_thickness_estimator, mock_ruler_detector, 
              mock_uniformity_metric, mock_visualizer, mock_data_exporter) -> NanoFiberAnalyzer:
     """Fixture to create NanoFiberAnalyzer with mocked dependencies."""
     return NanoFiberAnalyzer(
@@ -99,12 +99,12 @@ class TestNanoFiberAnalyzer:
         assert analyzer.config == mock_config
         assert analyzer.logger is not None
 
-    def test_process_image_successful_flow(self, analyzer: NanoFiberAnalyzer, mock_image_processor: MagicMock,
+    def test_process_image_successful_flow(self, analyzer: NanoFiberAnalyzer, mock_image_processor: MagicMock, 
                                            mock_ruler_detector: MagicMock, mock_shape_detector: MagicMock,
                                            mock_thickness_estimator: MagicMock, mock_uniformity_metric: MagicMock):
         """Test the successful processing flow of a single image."""
         test_image_path = Path("dummy_image.png")
-
+        
         result = analyzer.process_image(test_image_path)
 
         # Check if core methods of dependencies were called
@@ -124,7 +124,7 @@ class TestNanoFiberAnalyzer:
         assert result.spatial_scale_pixels_per_mm == mock_ruler_detector.detect_scale.return_value
         assert np.array_equal(result.contour, mock_shape_detector.detect.return_value)
 
-    def test_process_image_ruler_detection_disabled(self, analyzer: NanoFiberAnalyzer, mock_config: Config,
+    def test_process_image_ruler_detection_disabled(self, analyzer: NanoFiberAnalyzer, mock_config: Config, 
                                                      mock_ruler_detector: MagicMock):
         """Test that ruler detection is skipped if disabled in config."""
         mock_config.ruler_detection.enabled = False
@@ -132,20 +132,20 @@ class TestNanoFiberAnalyzer:
         # For this test, assume config is mutable or re-initialize for clarity if needed.
         # If analyzer takes a deepcopy of config, this won't work without re-init.
         # Let's assume direct use for now. If not, test needs analyzer re-init.
-
+        
         test_image_path = Path("dummy_image_disabled_ruler.png")
         analyzer.process_image(test_image_path)
-
+        
         mock_ruler_detector.detect_scale.assert_not_called()
-
+        
         # Reset for other tests if config is shared by fixture scope
-        mock_config.ruler_detection.enabled = True
+        mock_config.ruler_detection.enabled = True 
 
     def test_process_image_load_failure(self, analyzer: NanoFiberAnalyzer, mock_image_processor: MagicMock):
         """Test handling of image load failure."""
         test_image_path = Path("non_existent.png")
         mock_image_processor.load_image.side_effect = FileNotFoundError("File not found")
-
+        
         with pytest.raises(FileNotFoundError):
             analyzer.process_image(test_image_path)
 
@@ -153,10 +153,10 @@ class TestNanoFiberAnalyzer:
         """Test handling of an exception during ruler detection."""
         test_image_path = Path("ruler_exception.png")
         mock_ruler_detector.detect_scale.side_effect = Exception("Ruler crash")
-
+        
         # The processing should continue, but log an error and scale should be None
         result = analyzer.process_image(test_image_path)
-
+        
         assert "Error during scale detection: Ruler crash" in caplog.text
         assert result.spatial_scale_pixels_per_mm is None
 
@@ -167,7 +167,7 @@ class TestNanoFiberAnalyzer:
         # Setup mock_glob to return a list of Path objects
         mock_image_paths = [Path("img1.png"), Path("img2.jpg")]
         mock_glob.return_value = mock_image_paths
-
+        
         # Mock analyzer.process_image to simplify testing batch logic
         analyzer.process_image = MagicMock(return_value=AnalysisResult(
             image_path=Path("dummy"), contour=np.array([]),
@@ -175,9 +175,9 @@ class TestNanoFiberAnalyzer:
             spatial_scale_pixels_per_mm=5.0,
             metadata={}
         ))
-
+        
         batch_results = analyzer.batch_process(mock_config.output_dir, "*.png")
-
+        
         mock_glob.assert_called_once_with("*.png")
         assert analyzer.process_image.call_count == len(mock_image_paths)
         analyzer.process_image.assert_any_call(mock_image_paths[0])
@@ -189,9 +189,9 @@ class TestNanoFiberAnalyzer:
     def test_batch_process_no_images_found(self, mock_glob: MagicMock, analyzer: NanoFiberAnalyzer, mock_config: Config):
         """Test batch processing when no images match the pattern."""
         mock_glob.return_value = [] # No images found
-
+        
         batch_results = analyzer.batch_process(mock_config.output_dir, "*.tif")
-
+        
         mock_glob.assert_called_once_with("*.tif")
         assert len(batch_results) == 0
 
@@ -213,12 +213,12 @@ class TestNanoFiberAnalyzer:
             )
 
         analyzer.process_image = MagicMock(side_effect=process_image_side_effect)
-
+        
         batch_results = analyzer.batch_process(mock_config.output_dir, "*.png") # Pattern doesn't matter due to mock_glob
-
+        
         assert analyzer.process_image.call_count == len(mock_image_paths)
         assert len(batch_results) == len(mock_image_paths)
-
+        
         # Find the successful and failed results in the output
         success_results = [r for r in batch_results if r['status'] == 'success']
         error_results = [r for r in batch_results if r['status'] == 'error']

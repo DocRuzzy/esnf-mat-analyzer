@@ -1,5 +1,9 @@
+
 """
 Visualization components for nanofiber thickness analysis.
+
+Author: ESNF Mat Analyzer Team
+License: GNU General Public License v3.0 or later (GPLv3)
 
 This module implements various visualization techniques for thickness maps
 and uniformity metrics, including heatmaps, radial profiles, and metric plots.
@@ -341,6 +345,90 @@ class Visualizer(VisualizerInterface):
         
         # Add summary text to the plot
         ax3.text(0, 1, summary, va='top', ha='left', wrap=True)
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        return fig
+
+    def create_multiscale_uniformity_heatmap(self, multiscale_maps: Dict[str, np.ndarray], 
+                                           roi_mask: np.ndarray) -> Figure:
+        """
+        Create a visualization of multiscale uniformity spatial maps.
+        
+        Args:
+            multiscale_maps: Dictionary of spatial uniformity maps for each scale
+            roi_mask: Boolean mask indicating the region of interest
+            
+        Returns:
+            Matplotlib Figure object
+        """
+        self.logger.debug("Creating multiscale uniformity heatmap")
+        
+        # Filter maps that are actually spatial (have '_map' in name)
+        spatial_maps = {k: v for k, v in multiscale_maps.items() if '_map' in k}
+        
+        if not spatial_maps:
+            # No spatial maps available, create a placeholder
+            fig, ax = plt.subplots(figsize=self.config.figure_size)
+            ax.text(0.5, 0.5, 'No spatial multiscale maps available.\nRun analysis with spatial mapping enabled.', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=14)
+            ax.set_title('Multiscale Uniformity Spatial Maps')
+            ax.axis('off')
+            return fig
+        
+        # Determine grid layout
+        n_maps = len(spatial_maps)
+        cols = min(3, n_maps)  # Max 3 columns
+        rows = (n_maps + cols - 1) // cols  # Ceiling division
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(rows, cols, figsize=(self.config.figure_size[0] * cols / 2, 
+                                                     self.config.figure_size[1] * rows / 2))
+        
+        # Handle single subplot case
+        if n_maps == 1:
+            axes = [axes]
+        elif rows == 1:
+            axes = [axes] if cols == 1 else axes
+        else:
+            axes = axes.flatten()
+        
+        # Plot each scale map
+        for idx, (map_name, map_data) in enumerate(spatial_maps.items()):
+            ax = axes[idx]
+            
+            # Extract scale level from map name
+            scale_level = map_name.replace('scale_', '').replace('_uniformity_map', '')
+            
+            # Create masked array for better visualization
+            masked_data = np.ma.masked_array(map_data, mask=~roi_mask.astype(bool))
+            
+            # Only show non-zero values (areas that were actually analyzed)
+            masked_data = np.ma.masked_where(masked_data == 0, masked_data)
+            
+            # Create heatmap
+            if np.ma.count(masked_data) > 0:  # If there's data to show
+                im = ax.imshow(masked_data, cmap='RdYlGn', vmin=0, vmax=1, aspect='equal')
+                plt.colorbar(im, ax=ax, shrink=0.8, label='Uniformity Score')
+            else:
+                # No data to show, create placeholder
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+                ax.imshow(np.zeros_like(roi_mask), cmap='gray', alpha=0.3)
+            
+            ax.set_title(f'Scale {scale_level} Uniformity')
+            ax.set_xlabel('X (pixels)')
+            ax.set_ylabel('Y (pixels)')
+            ax.set_xticks([])
+            ax.set_yticks([])
+        
+        # Hide unused subplots
+        for idx in range(n_maps, len(axes)):
+            axes[idx].axis('off')
+        
+        # Add overall title
+        fig.suptitle('Multiscale Uniformity Spatial Distribution\n(Green = High Uniformity, Red = Low Uniformity)', 
+                    fontsize=14, y=0.98)
         
         # Adjust layout
         plt.tight_layout()

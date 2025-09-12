@@ -1,13 +1,286 @@
-# Nanofiber Thickness Uniformity Analyzer
+# ESNF Mat Analyzer
 
-A Python package for analyzing the thickness uniformity of electrospun nanofiber (ESNF) mats from color images. The software converts brightness in images to estimated thickness and calculates various uniformity metrics to quantify the distribution of fibers across the mat.
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![DOI](https://img.shields.io/badge/DOI-pending-orange.svg)](https://doi.org/pending)
 
-## Features
+**Advanced Analysis Tool for Electrospun Nanofiber Mat Uniformity and Structure**
 
-- **Image Processing**: Load and preprocess images for analysis
-- **Automatic ROI Detection**: Detect circular regions of interest
-- **Thickness Estimation**: Convert brightness to estimated thickness
-- **Uniformity Metrics**:
+## Summary
+
+The ESNF Mat Analyzer is a comprehensive Python software package designed for quantitative analysis of electrospun nanofiber mats. It provides advanced image processing capabilities, multiple uniformity metrics, and sophisticated visualization tools specifically tailored for materials science research involving nanofiber characterization.
+
+## Statement of Need
+
+Electrospun nanofiber mats are crucial materials in applications ranging from filtration and tissue engineering to energy storage. The uniformity and structural properties of these mats directly impact their performance, yet existing analysis tools often lack the specialized metrics and robust image processing capabilities required for comprehensive characterization. 
+
+Current solutions typically focus on individual fiber properties rather than mat-scale uniformity, provide limited background correction methods, or lack physics-based thickness estimation models. ESNF Mat Analyzer addresses these limitations by providing:
+
+- **Mat-scale uniformity analysis** using advanced FFT-based anisotropy detection
+- **Multiple thickness estimation models** including physics-based Beer-Lambert approaches
+- **Comprehensive texture analysis** using Gray-Level Co-occurrence Matrix (GLCM) metrics
+- **Robust background correction** with multiple algorithms (BASIC, rolling ball, RESTORE, homomorphic)
+- **Power spectral density analysis** for frequency domain characterization
+- **User-friendly GUI** with real-time visualization and method comparison tools
+
+## Key Features
+
+### Advanced Image Processing
+- **Multiple background correction methods**: Default normalization, BASIC, rolling ball, RESTORE, and homomorphic filtering
+- **HDR processing support** for high dynamic range imaging
+- **Robust preprocessing** with adaptive thresholding and noise reduction
+- **Region of Interest (ROI) selection** with interactive tools
+
+### Comprehensive Uniformity Metrics
+- **Traditional metrics**: Coefficient of variation, thickness range ratio, Gini coefficient
+- **Mat-scale analysis**: Overall uniformity score combining multiple factors
+- **Anisotropy detection**: FFT-based directional analysis
+- **Texture characterization**: GLCM-based homogeneity, energy, correlation, and contrast
+- **Frequency analysis**: Power spectral density uniformity metrics
+
+### Physics-Based Analysis
+- **Beer-Lambert thickness model**: Physics-based attenuation modeling
+- **Multiple thickness models**: Linear, logarithmic, and exponential options
+- **Uncertainty quantification**: Statistical analysis of measurement reliability
+- **Spatial scale calibration**: Accurate dimensional analysis
+
+### Visualization and Export
+- **Interactive heatmaps** with customizable color schemes
+- **Comparative visualizations** for method evaluation
+- **Comprehensive reporting** with tabbed results display
+- **Data export capabilities** in multiple formats
+- **Publication-ready figures** with proper scaling and annotations
+
+## Installation
+
+### Requirements
+- Python 3.8 or higher
+- NumPy >= 1.20.0
+- SciPy >= 1.7.0
+- OpenCV >= 4.5.0
+- scikit-image >= 0.18.0
+- Matplotlib >= 3.3.0
+- Pillow >= 8.0.0
+- tkinter (usually included with Python)
+
+### Quick Start
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/DocRuzzy/esnf-mat-analyzer.git
+cd esnf-mat-analyzer
+```
+
+
+2. **Run the automated setup (recommended for all users and JOSS reviewers):**
+```bash
+python setup_environment.py
+```
+
+This script will:
+- Check your Python version and environment
+- Install all required dependencies (including optional ones for full functionality)
+- Install the package in editable mode for development
+- Verify all imports and create run scripts for your platform
+
+3. **Start the application:**
+```bash
+python run_esnf_analyzer.py
+```
+
+### Alternative Installation Methods
+
+**Using pip (when published):**
+```bash
+pip install esnf-mat-analyzer
+```
+
+
+**For development (advanced users):**
+If you want to manually install in editable mode, you can still use:
+```bash
+pip install -e .
+```
+But this is not required if you use `python setup_environment.py`.
+
+## Usage
+
+### Graphical User Interface
+
+The GUI provides an intuitive interface for nanofiber mat analysis:
+
+1. **Load images** using the file selection panel
+2. **Select analysis region** by drawing a rectangle on the image
+3. **Configure analysis parameters**:
+   - Background correction method
+   - Thickness estimation model
+   - Processing options
+4. **Run analysis** and view comprehensive results
+5. **Export results** and visualizations
+
+### Command Line Interface
+
+For batch processing and automation:
+
+```bash
+# Analyze a single image
+esnf-analyzer input_image.png --output results/ --config config.yaml
+
+# Batch process a directory
+esnf-analyzer input_directory/ --output results/ --pattern "*.png"
+
+# Use specific background correction
+esnf-analyzer image.png --bg-method rolling_ball --thickness-model beer_lambert
+```
+
+### Python API
+
+For integration into research workflows:
+
+```python
+from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
+from esnf_mat_analyzer.config.config_manager import get_default_config
+
+# Setup analyzer
+config = get_default_config()
+analyzer = NanoFiberAnalyzer(config)
+
+# Analyze image
+result = analyzer.process_image("path/to/image.png", roi=(100, 100, 500, 500))
+
+# Access results
+print(f"Overall uniformity: {result.metrics['overall_mat_uniformity']:.4f}")
+print(f"Anisotropy index: {result.metrics['anisotropy_index']:.4f}")
+```
+
+## Method Comparison and Validation
+
+The software includes built-in tools for comparing different analysis methods:
+
+### Background Correction Comparison
+- Visual side-by-side comparison of correction methods
+- Statistical analysis of correction effectiveness
+- Saturation rate calculation and optimization
+
+### Thickness Model Validation
+- Performance metrics for different thickness models
+- Signal-to-noise ratio analysis
+- Dynamic range evaluation
+- Coefficient of variation comparison
+
+## Configuration
+
+The software uses YAML configuration files for reproducible analysis:
+
+```yaml
+processing:
+  background_correction_method: "rolling_ball"
+  leveling:
+    enabled: true
+    method: "polynomial"
+
+thickness:
+  model_type: "beer_lambert"
+  calibration_factor: 1.0
+
+analysis:
+  uniformity_metrics: ["cv", "gini", "range_ratio"]
+  texture_analysis: true
+  anisotropy_analysis: true
+```
+
+## Output and Results
+
+### Metrics Provided
+- **Overall Mat Uniformity Score**: Composite metric (0-1 scale)
+- **Anisotropy Index**: Directional uniformity measure
+- **Texture Metrics**: Homogeneity, energy, correlation, contrast
+- **Traditional Metrics**: CV, Gini coefficient, thickness ratios
+- **Power Spectral Density**: Frequency domain uniformity
+
+### Export Formats
+- CSV files with detailed metrics
+- JSON files for programmatic access
+- PNG/PDF figures for publications
+- YAML configuration files for reproducibility
+
+## Contributing
+
+We welcome contributions from the research community:
+
+1. **Fork the repository** on GitHub
+2. **Create a feature branch** (`git checkout -b feature/new-analysis-method`)
+3. **Make your changes** with appropriate tests
+4. **Submit a pull request** with a clear description
+
+
+### Development Setup (recommended)
+```bash
+git clone https://github.com/DocRuzzy/esnf-mat-analyzer.git
+cd esnf-mat-analyzer
+python setup_environment.py
+```
+If you want to install extra development tools, you may also run:
+```bash
+pip install -e .[dev]
+```
+
+## Testing
+
+Run the test suite to ensure everything works correctly:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest -m "not slow"  # Skip slow tests
+pytest -m "unit"      # Unit tests only
+pytest -m "integration"  # Integration tests only
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use ESNF Mat Analyzer in your research, please cite:
+
+```bibtex
+@software{esnf_mat_analyzer,
+  title = {{ESNF Mat Analyzer: Advanced Analysis Tool for Electrospun Nanofiber Mat Uniformity}},
+  author = {ESNF Mat Analyzer Team},
+  year = {2025},
+  url = {https://github.com/DocRuzzy/esnf-mat-analyzer},
+  doi = {pending}
+}
+```
+
+## Acknowledgments
+
+- Thanks to the materials science research community for requirements and feedback
+- OpenCV and scikit-image teams for robust image processing foundations
+- Matplotlib team for excellent visualization capabilities
+
+## Support and Documentation
+
+- **GitHub Issues**: [Report bugs or request features](https://github.com/DocRuzzy/esnf-mat-analyzer/issues)
+- **Documentation**: See inline code documentation and examples
+- **Examples**: Check the `examples/` directory for sample analyses
+
+## Roadmap
+
+Future developments planned:
+- Machine learning-based fiber detection
+- 3D analysis capabilities for thick mats
+- Advanced statistical modeling
+- Web-based interface option
+- Integration with microscopy software
+
+---
+
+**Keywords**: nanofiber, electrospinning, image analysis, materials science, uniformity metrics, microscopy, texture analysis, Python
   - Radial Uniformity Index
   - Gini Coefficient
   - Thickness Range Ratio

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
 from esnf_mat_analyzer.processing.advanced_thickness import AdvancedThicknessEstimator
 from esnf_mat_analyzer.analysis.frequency_metrics import FrequencyAnalyzer
 from esnf_mat_analyzer.analysis.texture_metrics import GLCMAnalyzer, LBPAnalyzer, FractalAnalyzer
