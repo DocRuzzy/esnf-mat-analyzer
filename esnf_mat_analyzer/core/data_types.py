@@ -270,6 +270,40 @@ class ExportConfig:
 
 
 @dataclass
+class Tick:
+    """Represents a single detected tick mark on a ruler."""
+    x_position: float
+    """The x-coordinate of the tick mark in the image."""
+    line: np.ndarray
+    """The (x1, y1, x2, y2) coordinates of the line segment forming the tick."""
+
+@dataclass
+class Ruler:
+    """
+    Represents a detected ruler, its components, and the calculated scale.
+
+    This data structure holds all information related to a ruler found in an
+    image, making it easier to pass this information between different parts of
+    the analysis pipeline.
+    """
+    body_lines: Tuple[np.ndarray, np.ndarray]
+    """A tuple containing the two main parallel lines that form the ruler's body."""
+
+    ticks: List[Tick]
+    """A list of `Tick` objects detected on the ruler."""
+
+    scale_px_per_mm: Optional[float]
+    """The calculated scale in pixels per millimeter. None if calculation failed."""
+
+    mask: np.ndarray
+    """A boolean numpy array with the same dimensions as the image, where True
+    indicates the area occupied by the detected ruler."""
+
+    roi: Tuple[int, int, int, int]
+    """The bounding box (x_start, y_start, x_end, y_end) of the region where the
+    ruler was detected."""
+
+@dataclass
 class Config:
     """Main configuration container."""
 
