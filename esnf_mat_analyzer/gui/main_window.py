@@ -706,7 +706,11 @@ class MainWindow(tk.Tk):
 
             processor = AdvancedBackgroundProcessor()
 
-            raw_image = cv2.imread(str(self.current_image_path))
+            # Convert PIL image to numpy array for OpenCV
+            raw_image = np.array(self.current_image)
+            # Convert RGB to BGR for OpenCV if image is RGB
+            if len(raw_image.shape) == 3 and raw_image.shape[2] == 3:
+                raw_image = cv2.cvtColor(raw_image, cv2.COLOR_RGB2BGR)
             gray_image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2GRAY)
 
             # Compare only the two Step 2 methods within the complete workflow
@@ -970,8 +974,8 @@ class MainWindow(tk.Tk):
             # Background correction method mapping
             method_mapping = {
                 "none": BackgroundCorrectionMethod.NONE,
-                "polynomial": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
-                "large_kernel_blur": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+                "polynomial": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+                "large_kernel_blur": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
             }
 
             selected_bg_method = self.bg_method_var.get()
