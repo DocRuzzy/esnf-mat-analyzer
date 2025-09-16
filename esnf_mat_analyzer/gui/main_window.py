@@ -119,11 +119,11 @@ class MainWindow(tk.Tk):
 
         self.bg_method_var = tk.StringVar(value="none")
         bg_methods = [
-            ("Default (Normalization)", "none"),
-            ("BASIC (Robust)", "basic"),
-            ("Rolling Ball", "rolling_ball"),
-            ("RESTORE", "restore"),
-            ("Homomorphic", "homomorphic")
+            ("Default (None)", "none"),
+            ("Polynomial Surface (Robust)", "basic"),
+            ("Large Kernel Blur", "rolling_ball"),
+            ("Complete Workflow", "restore"),
+            ("Complete Workflow (Alt)", "homomorphic")
         ]
 
         for text, value in bg_methods:
@@ -607,8 +607,23 @@ class MainWindow(tk.Tk):
             # Here you could blend img and fig_img if needed
             img = fig_img
             
-        img.save(filepath)
-        print(f"Image saved to {filepath}")
+        try:
+            # Convert to RGB mode to ensure compatibility
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            # Save without EXIF data
+            img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
+            print(f"Image saved to {filepath}")
+        except Exception as e:
+            print(f"Export failed: {e}")
+            # Try alternative save method
+            try:
+                img_array = np.array(img)
+                cv2.imwrite(filepath, cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR))
+                print(f"Image saved to {filepath} using alternative method")
+            except Exception as e2:
+                print(f"Alternative export failed: {e2}")
+                messagebox.showerror("Export Error", f"Failed to save image: {e2}")
 
     def on_bg_method_change(self):
         """Called when background correction method is changed."""
@@ -621,6 +636,23 @@ class MainWindow(tk.Tk):
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
+        # Convert PIL image to numpy array (RGB)
+        image_np = np.array(self.current_image)
+        if image_np.ndim == 2:
+            # Already grayscale
+            gray_image = image_np
+        elif image_np.ndim == 3 and image_np.shape[2] == 3:
+            # RGB to grayscale
+            gray_image = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+        else:
+            tk.messagebox.showerror("Error", "Unsupported image format for preview.")
+            return
+
+        # Defensive: check for empty image
+        if gray_image is None or gray_image.size == 0:
+            tk.messagebox.showerror("Error", "Failed to load image for preview. Image is empty.")
+            return
+
         # Create preview window
         preview_window = tk.Toplevel(self)
         preview_window.title("Background Correction Methods Comparison")
@@ -630,70 +662,60 @@ class MainWindow(tk.Tk):
         notebook = ttk.Notebook(preview_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Load and preprocess the image
-        try:
-            import cv2
-            raw_image = cv2.imread(str(self.current_image))
-            raw_image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
-            gray_image = cv2.cvtColor(raw_image_rgb, cv2.COLOR_RGB2GRAY)
+        # Define methods to test
+        methods = [
+            ("Default (Normalization)", "none", self._apply_default_correction),
+            ("BASIC (Robust)", "basic", self._apply_basic_correction),
+            ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction),
+            ("RESTORE", "restore", self._apply_restore_correction),
+            ("Homomorphic", "homomorphic", self._apply_homomorphic_correction)
+        ]
 
-            # Define methods to test
-            methods = [
-                ("Default (Normalization)", "none", self._apply_default_correction),
-                ("BASIC (Robust)", "basic", self._apply_basic_correction),
-                ("Rolling Ball", "rolling_ball", self._apply_rolling_ball_correction),
-                ("RESTORE", "restore", self._apply_restore_correction),
-                ("Homomorphic", "homomorphic", self._apply_homomorphic_correction)
-            ]
+        for method_name, method_id, method_func in methods:
+            # Create tab for this method
+            tab_frame = ttk.Frame(notebook)
+            notebook.add(tab_frame, text=method_name)
 
-            for method_name, method_id, method_func in methods:
-                # Create tab for this method
-                tab_frame = ttk.Frame(notebook)
-                notebook.add(tab_frame, text=method_name)
+            # Apply the background correction method
+            try:
+                corrected_image = method_func(gray_image)
 
-                # Apply the background correction method
-                try:
-                    corrected_image = method_func(gray_image)
-                    
-                    # Create side-by-side comparison
-                    fig = Figure(figsize=(12, 5))
-                    
-                    # Original image
-                    ax1 = fig.add_subplot(121)
-                    ax1.imshow(gray_image, cmap='gray')
-                    ax1.set_title('Original Image')
-                    ax1.axis('off')
-                    
-                    # Corrected image
-                    ax2 = fig.add_subplot(122)
-                    ax2.imshow(corrected_image, cmap='viridis')
-                    ax2.set_title(f'{method_name} Corrected')
-                    ax2.axis('off')
-                    
-                    # Add statistics
-                    stats_text = self._get_correction_stats(gray_image, corrected_image)
-                    fig.suptitle(f'{method_name}\n{stats_text}', fontsize=10)
-                    
-                    # Embed plot in tab
-                    canvas = FigureCanvasTkAgg(fig, tab_frame)
-                    canvas.draw()
-                    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                    
-                    # Add selection button
-                    select_button = ttk.Button(
-                        tab_frame,
-                        text=f"Use {method_name}",
-                        command=lambda m=method_id: self._select_bg_method(m, preview_window)
-                    )
-                    select_button.pack(pady=10)
+                # Create side-by-side comparison
+                fig = Figure(figsize=(12, 5))
 
-                except Exception as e:
-                    # Show error in tab
-                    error_label = ttk.Label(tab_frame, text=f"Error: {str(e)}")
-                    error_label.pack(expand=True)
+                # Original image
+                ax1 = fig.add_subplot(121)
+                ax1.imshow(gray_image, cmap='gray')
+                ax1.set_title('Original Image')
+                ax1.axis('off')
 
-        except Exception as e:
-            tk.messagebox.showerror("Error", f"Failed to create preview: {str(e)}")
+                # Corrected image
+                ax2 = fig.add_subplot(122)
+                ax2.imshow(corrected_image, cmap='viridis')
+                ax2.set_title(f'{method_name} Corrected')
+                ax2.axis('off')
+
+                # Add statistics
+                stats_text = self._get_correction_stats(gray_image, corrected_image)
+                fig.suptitle(f'{method_name}\n{stats_text}', fontsize=10)
+
+                # Embed plot in tab
+                canvas = FigureCanvasTkAgg(fig, tab_frame)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                # Add selection button
+                select_button = ttk.Button(
+                    tab_frame,
+                    text=f"Use {method_name}",
+                    command=lambda m=method_id: self._select_bg_method(m, preview_window)
+                )
+                select_button.pack(pady=10)
+
+            except Exception as e:
+                # Show error in tab
+                error_label = ttk.Label(tab_frame, text=f"Error: {str(e)}")
+                error_label.pack(expand=True)
 
     def _apply_default_correction(self, image):
         """Apply default normalization correction."""
@@ -707,25 +729,25 @@ class MainWindow(tk.Tk):
 
     def _apply_basic_correction(self, image):
         """Apply BASIC correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.basic_correction(image, 1)
 
     def _apply_rolling_ball_correction(self, image):
         """Apply rolling ball correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.rolling_ball_3d(image, 50)
 
     def _apply_restore_correction(self, image):
         """Apply RESTORE correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.restore_method(image, 5.0)
 
     def _apply_homomorphic_correction(self, image):
         """Apply homomorphic correction."""
-        from esnf_mat_analyzer.processing.advanced_background import AdvancedBackgroundProcessor
+        from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.homomorphic_filter(image, 30, 0.5, 2.0)
 
@@ -831,10 +853,10 @@ class MainWindow(tk.Tk):
             # Background correction method
             method_mapping = {
                 "none": BackgroundCorrectionMethod.NONE,
-                "basic": BackgroundCorrectionMethod.BASIC,
-                "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
-                "restore": BackgroundCorrectionMethod.RESTORE,
-                "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+                "basic": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+                "rolling_ball": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
+                "restore": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+                "homomorphic": BackgroundCorrectionMethod.COMPLETE_WORKFLOW  # Using complete workflow as fallback
             }
             
             selected_bg_method = self.bg_method_var.get()
@@ -899,18 +921,31 @@ class MainWindow(tk.Tk):
 
         # Create an image from the current display
         try:
-            # Simple export of the current image for now
+            # Convert the image to RGB
             pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
-            pil_image.save(filepath)
+            # Save without EXIF data
+            pil_image.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
             print(f"Image saved to {filepath}")
         except Exception as e:
             print(f"Export failed: {e}")
+            # Try alternative save method using OpenCV
+            try:
+                cv2.imwrite(filepath, self.current_image)
+                print(f"Image saved to {filepath} using alternative method")
+            except Exception as e2:
+                print(f"Alternative export failed: {e2}")
+                messagebox.showerror("Export Error", f"Failed to save image: {e2}")
 
     def display_results(self, result):
         # Create a new window to display results
         results_window = tk.Toplevel(self)
         results_window.title("Analysis Results")
         results_window.geometry("800x600")
+        
+        # Debug log to check result content
+        print(f"Result metrics: {result.metrics}")
+        print(f"Traditional metrics: {[k for k, v in result.metrics.items() if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))]}")
+        print(f"Mat analysis metrics: {[k for k, v in result.metrics.items() if k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))]}")
 
         # Create notebook for tabbed results
         notebook = ttk.Notebook(results_window)
@@ -945,8 +980,12 @@ class MainWindow(tk.Tk):
         mat_frame = ttk.Frame(notebook)
         notebook.add(mat_frame, text="Mat-Scale Analysis")
         
-        mat_text = tk.Text(mat_frame, wrap=tk.WORD)
+        mat_scroll = ttk.Scrollbar(mat_frame)
+        mat_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        mat_text = tk.Text(mat_frame, wrap=tk.WORD, yscrollcommand=mat_scroll.set)
         mat_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        mat_scroll.config(command=mat_text.yview)
 
         # Format mat-scale results
         mat_result = "Mat-Scale Uniformity Analysis\n"

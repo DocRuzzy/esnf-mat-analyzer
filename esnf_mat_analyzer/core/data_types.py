@@ -265,6 +265,40 @@ class RulerDetectionConfig:
     hough_threshold: int = 20
     """Accumulator threshold parameter for Hough Line Transform."""
 
+    # Tick detection and validation parameters
+    abs_min_tick_length_px: int = 10
+    """Absolute minimum length for a tick mark in pixels."""
+
+    min_tick_length_factor: float = 0.5
+    """Minimum tick length as a factor of ruler thickness."""
+
+    max_tick_length_factor: float = 2.0
+    """Maximum tick length as a factor of ruler thickness."""
+
+    min_tick_separation_px: int = 5
+    """Minimum separation between ticks in pixels."""
+
+    tick_y_tolerance_factor: float = 0.5
+    """Tolerance factor for tick vertical position relative to ruler thickness."""
+
+    # DeepGP-related parameters
+    use_deep_gp: bool = False
+    """Whether to use DeepGP for scale refinement."""
+
+    deep_gp_model_path: Optional[str] = None
+    """Path to the DeepGP model weights file."""
+
+    # Scoring parameters for ruler body detection
+    scoring: Dict[str, float] = field(default_factory=lambda: {
+        "length_weight": 1.0,
+        "overlap_weight": 2.0,
+        "parallelism_penalty": 0.5,
+        "tick_count_weight": 10.0,
+        "min_thickness_px": 20,
+        "max_thickness_px": 100
+    })
+    """Parameters for scoring potential ruler body line pairs."""
+
 
 @dataclass
 class ExportConfig:
