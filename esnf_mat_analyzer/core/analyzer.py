@@ -26,6 +26,8 @@ from .interfaces import (
 from .data_types import Config, AnalysisResult
 from ..processing.shape_detector import ShapeDetector
 from ..processing.ruler_detector import RulerDetector
+from ..analysis.mat_anisotropy import MatAnisotropyAnalyzer, MatTextureAnalyzer, PowerSpectralDensityAnalyzer
+from ..analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
 
 # Setup module logger
 logger = logging.getLogger(__name__)
@@ -285,7 +287,25 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         
         # Mat-scale uniformity analysis
         try:
-            from ..analysis.multiscale_uniformity import MultiScaleUniformityAnalyzer
+            anisotropy_analyzer = MatAnisotropyAnalyzer()
+            anisotropy_metrics = anisotropy_analyzer.analyze_mat_anisotropy(thickness_map, gel_mask)
+            metrics.update(anisotropy_metrics)
+            self.logger.debug(f"Anisotropy metrics calculated: {len(anisotropy_metrics)} metrics")
+
+            texture_analyzer = MatTextureAnalyzer()
+            texture_metrics = texture_analyzer.analyze_mat_texture(roi_corrected_image, gel_mask)
+            metrics.update(texture_metrics)
+            self.logger.debug(f"Texture metrics calculated: {len(texture_metrics)} metrics")
+
+            psd_analyzer = PowerSpectralDensityAnalyzer()
+            psd_metrics = psd_analyzer.analyze_psd(thickness_map, gel_mask)
+            metrics.update(psd_metrics)
+            self.logger.debug(f"PSD metrics calculated: {len(psd_metrics)} metrics")
+
+        except Exception as e:
+            self.logger.error(f"Error calculating advanced mat-scale uniformity metrics: {e}", exc_info=True)
+
+        try:
             mat_analyzer = MultiScaleUniformityAnalyzer()
             mat_metrics = mat_analyzer.analyze_multiscale_uniformity(thickness_map, gel_mask)
             metrics.update(mat_metrics)

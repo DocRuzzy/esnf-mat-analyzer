@@ -369,28 +369,40 @@ class PowerSpectralDensityAnalyzer:
         else:
             masked_thickness = thickness_map
             
+        logger.debug(f"PSD analysis input shape: {masked_thickness.shape}")
+        
         # Remove mean and apply window
         windowed = self._apply_hanning_window(masked_thickness - np.mean(masked_thickness))
-        
+        logger.debug("Applied Hanning window for PSD.")
+
         # Calculate 2D FFT
         fft = np.fft.fft2(windowed)
         power_spectrum = np.abs(fft) ** 2
-        
+        logger.debug(f"Power spectrum calculated, shape: {power_spectrum.shape}, sum: {np.sum(power_spectrum):.2e}")
+
         # Calculate radial power spectrum
         radial_psd = self._calculate_radial_psd(power_spectrum)
-        
+        logger.debug(f"Radial PSD calculated, length: {len(radial_psd)}")
+
         # Find dominant frequencies
         dominant_freq = self._find_dominant_frequency(radial_psd)
         
         # Calculate periodicity index
         periodicity_index = self._calculate_periodicity_index(radial_psd)
         
-        return {
-            'dominant_frequency': dominant_freq,
-            'periodicity_index': periodicity_index,
-            'spectral_centroid': self._calculate_spectral_centroid(radial_psd),
-            'spectral_spread': self._calculate_spectral_spread(radial_psd)
+        # Calculate spectral centroid and spread
+        spectral_centroid = self._calculate_spectral_centroid(radial_psd)
+        spectral_spread = self._calculate_spectral_spread(radial_psd)
+
+        metrics = {
+            'psd_dominant_frequency': dominant_freq,
+            'psd_periodicity_index': periodicity_index,
+            'psd_spectral_centroid': spectral_centroid,
+            'psd_spectral_spread': spectral_spread,
+            'psd_uniformity': 1.0 / (1.0 + spectral_spread) # Example uniformity metric
         }
+        logger.info(f"Calculated PSD metrics: {metrics}")
+        return metrics
     
     def _apply_hanning_window(self, image: np.ndarray) -> np.ndarray:
         """Apply 2D Hanning window."""

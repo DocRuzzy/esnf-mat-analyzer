@@ -966,12 +966,33 @@ class MainWindow(tk.Tk):
         
         basic_result += "\nTraditional Uniformity Metrics:\n"
         traditional_metrics = {k: v for k, v in result.metrics.items() 
-                             if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))}
+                             if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity', 'scale_'))}
         for name, value in traditional_metrics.items():
             if isinstance(value, float) and not math.isnan(value):
                 basic_result += f"  {name}: {value:.4f}\n"
             else:
                 basic_result += f"  {name}: {value}\n"
+
+        # Add Multi-Scale Analysis to Basic Metrics with proper formatting
+        scale_metrics = {k: v for k, v in result.metrics.items() if k.startswith('scale_')}
+        if scale_metrics:
+            basic_result += "\nMulti-Scale Uniformity Analysis:\n"
+            basic_result += "-----------------------------------\n"
+            scale_names = {
+                'scale_0_uniformity': 'Fiber-Level Uniformity (Local)',
+                'scale_1_uniformity': 'Small Cluster Uniformity',
+                'scale_2_uniformity': 'Medium Cluster Uniformity',
+                'scale_3_uniformity': 'Large Region Uniformity',
+                'scale_4_uniformity': 'Global Mat Uniformity'
+            }
+            for name in sorted(scale_metrics.keys()):
+                value = scale_metrics[name]
+                display_name = scale_names.get(name, name.replace('_', ' ').title())
+                if isinstance(value, float) and not math.isnan(value):
+                    basic_result += f"  {display_name}: {value:.4f}\n"
+                else:
+                    basic_result += f"  {display_name}: {value}\n"
+            basic_result += "\nNote: Values range from 0-1, higher values indicate better uniformity at each scale.\n"
         
         basic_text.insert(tk.END, basic_result)
         basic_text.config(state=tk.DISABLED)
@@ -991,12 +1012,20 @@ class MainWindow(tk.Tk):
         mat_result = "Mat-Scale Uniformity Analysis\n"
         mat_result += "=" * 40 + "\n\n"
         
+        # Debug print metrics for troubleshooting
+        print("Debug - Available metrics:", result.metrics.keys())
+        
         # Overall mat uniformity score
         if 'overall_mat_uniformity' in result.metrics:
             score = result.metrics['overall_mat_uniformity']
             if isinstance(score, float) and not math.isnan(score):
                 mat_result += f"Overall Mat Uniformity Score: {score:.4f}\n"
                 mat_result += f"Uniformity Rating: {self._get_uniformity_rating(score)}\n\n"
+                
+        # Print all available metric keys for debugging
+        print("\nAvailable Metrics:")
+        for key in result.metrics.keys():
+            print(f"- {key}")
         
         # Anisotropy metrics
         anisotropy_metrics = {k: v for k, v in result.metrics.items() if k.startswith('anisotropy_')}
@@ -1024,6 +1053,8 @@ class MainWindow(tk.Tk):
                     mat_result += f"  {clean_name}: {value}\n"
             mat_result += "\n"
         
+
+        
         # Power spectral density metrics
         psd_metrics = {k: v for k, v in result.metrics.items() if k.startswith('psd_')}
         if psd_metrics:
@@ -1035,16 +1066,58 @@ class MainWindow(tk.Tk):
                     mat_result += f"  {clean_name}: {value:.4f}\n"
                 else:
                     mat_result += f"  {clean_name}: {value}\n"
+            mat_result += "\n"  # Add extra newline for spacing
+        
+        # Uniformity Indexes Section
+        mat_result += "\nUniformity Indexes:\n"
+        mat_result += "-" * 35 + "\n"
+        
+        # Primary indicators section
+        mat_result += "Primary Uniformity Indicators:\n"
+        
+        # Add Anisotropy Index
+        anisotropy_value = result.metrics.get('anisotropy_index', float('nan'))
+        if isinstance(anisotropy_value, float) and not math.isnan(anisotropy_value):
+            mat_result += f"  Anisotropy Index: {anisotropy_value:.4f} (0-1, lower is better)\n"
+
+        # Add Overall Mat Uniformity
+        overall_value = result.metrics.get('overall_mat_uniformity', float('nan'))
+        if isinstance(overall_value, float) and not math.isnan(overall_value):
+            mat_result += f"  Overall Mat Uniformity: {overall_value:.4f} (0-1, higher is better)\n"
+
+        # Add Texture-based metrics with clear labels
+        mat_result += "\nTexture-based Uniformity:\n"
+        texture_metrics = {
+            'texture_homogeneity': ('Homogeneity', '0-1, higher is better'),
+            'texture_energy': ('Energy', '0-1, higher is better'),
+            'texture_correlation': ('Correlation', '-1 to 1'),
+            'texture_contrast': ('Contrast', '0+, lower is better')
+        }
+        
+        for metric_key, (display_name, range_info) in texture_metrics.items():
+            value = result.metrics.get(metric_key, float('nan'))
+            if isinstance(value, float) and not math.isnan(value):
+                mat_result += f"  {display_name}: {value:.4f} ({range_info})\n"
+
+        # Add PSD Uniformity
+        mat_result += "\nFrequency Analysis:\n"
+        psd_value = result.metrics.get('psd_uniformity', float('nan'))
+        if isinstance(psd_value, float) and not math.isnan(psd_value):
+            mat_result += f"  PSD Uniformity: {psd_value:.4f} (0-1, higher is better)\n"
+        
+
+        
+        mat_result += "\n"
         
         # Add interpretation guide
-        mat_result += "\n" + "=" * 40 + "\n"
+        mat_result += "=" * 40 + "\n"
         mat_result += "Interpretation Guide:\n"
-        mat_result += "- Anisotropy Index: Lower values indicate more isotropic (uniform) structure\n"
-        mat_result += "- Homogeneity: Higher values indicate more uniform texture\n"
-        mat_result += "- Energy: Higher values indicate more ordered structure\n"
-        mat_result += "- Correlation: Measures linear dependencies in texture\n"
-        mat_result += "- Contrast: Lower values indicate smoother texture\n"
-        mat_result += "- PSD Uniformity: Higher values indicate more uniform frequency distribution\n"
+        mat_result += "- Anisotropy Index (0-1): Lower values indicate more isotropic (uniform) structure\n"
+        mat_result += "- Homogeneity (0-1): Higher values indicate more uniform texture\n"
+        mat_result += "- Energy (0-1): Higher values indicate more ordered structure\n"
+        mat_result += "- Correlation (-1 to 1): Measures linear dependencies in texture\n"
+        mat_result += "- Contrast (0+): Lower values indicate smoother texture\n"
+        mat_result += "- PSD Uniformity (0-1): Higher values indicate more uniform frequency distribution\n"
         
         mat_text.insert(tk.END, mat_result)
         mat_text.config(state=tk.DISABLED)
