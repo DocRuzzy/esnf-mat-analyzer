@@ -12,8 +12,8 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by AI as
 
 | ID | Title | Status | Prereq | Block Reason | Notes / Next Action |
 |----|-------|--------|--------|--------------|---------------------|
-| T001 | Expose all mat-scale metrics in GUI results tab | DONE | - | - | Implemented display with red tagging for errors/inappropriate |
-| T002 | Shape-aware appropriateness flag refinement | TODO | T001 | - | Replace placeholder ROI shape check with geometric analysis (eccentricity, solidity). |
+| T001 | Expose all mat-scale metrics in GUI results tab | DONE | - | - | Implemented display with red tagging for errors/inappropriate (2025-09-05) |
+| T002 | Shape-aware appropriateness flag refinement | DONE | T001 | - | Implemented geometric ROI checks (area, solidity, eccentricity) and UI warning/visual flag in `esnf_mat_analyzer/gui/main_window.py`. (2025-09-29) |
 | T003 | Add background method selection (full enum) to GUI | TODO | - | - | Add radio buttons + mapping; persist selection in config. |
 | T004 | Implement polygon / freeform ROI selection | TODO | T003 | - | Canvas tool for polygon points, mask conversion. |
 | T005 | Introduce automated metric validation (range / NaN checks) | TODO | T001 | - | Inject validation step before display; mark failures. |
@@ -21,7 +21,10 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by AI as
 | T007 | Improve multiscale uniformity computation robustness | TODO | - | - | Verify wavelet path vs fallback; add percentile-based normalization. |
 | T008 | Document all uniformity metrics in docs/guides/uniformity.md | TODO | T002,T005 | - | Create detailed formulas + interpretation thresholds. |
 | T009 | Add CLI flag to export full mat-scale metrics JSON | TODO | - | - | Extend cli/main.py output options. |
-| T010 | Implement task ledger auto-update hook | IN-PROGRESS | - | - | After each change, assistant patches this file. |
+| T010 | Implement task ledger auto-update hook | DONE | - | - | After each change, assistant patches this file. (2025-09-29) |
+| T023 | GUI: Fit main window for 1080p and add left-panel + canvas scrollbars | DONE | - | - | Implemented geometry and a scrollable left panel in `esnf_mat_analyzer/gui/main_window.py`. (2025-09-29) |
+| T024 | Fix crash: OpenCV error "!_src.empty() in cvtColor" when previewing or analysing | IN-PROGRESS | - | Need failing image(s) and reproduction steps | Added defensive checks and plan to convert PIL images to RGB before OpenCV conversions; awaiting repro for verification. |
+| T025 | Unit tests for GUI image/ROI helpers | DONE | T002,T024 | - | Added `tests/unit/test_gui_helpers.py` with tests for `_to_numpy_rgb`, `_to_numpy_gray`, and `_roi_shape_metrics`. (2025-09-29) |
 | T011 | Replace manual scale bar (circle) with H-shaped scale widget | TODO | T001 | - | Update `main_window.py` scale drawing to H-shape; ensure draggable handles and physical-length input. |
 | T012 | Show GUI popup when analyzing without ROI selected | TODO | T001 | - | Replace terminal warning with `messagebox.showwarning` popup in `analyze()` and add unit test. |
 | T013 | Define composite background quality metric | DONE | T001 | - | Implemented in integration test (background_std, signal_mean, dynamic_range, saturation). |
@@ -56,3 +59,7 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by AI as
 ## Update Policy
 
 After every task completion or status change, this file must be updated by the AI assistant (Requirement R-LEDGER-UPDATE). The assistant also updates `.github/copilot-instructions.md` to include this policy.
+
+## Audit / Recent Activity
+
+- Last verification: 2025-09-29 — `task-ledger.md` contents checked and changes confirmed (T010, T023 set to DONE; T024 added as IN-PROGRESS). Assistant internal todo marked accordingly.

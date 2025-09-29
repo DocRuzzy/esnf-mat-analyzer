@@ -365,6 +365,116 @@ class MainWindow(tk.Tk):
         if hasattr(self, 'scale_bar_length_mm'):
             self.draw_scale_bar()
 
+    # --- Image conversion helpers (defensive) ---
+    def _to_numpy_rgb(self, image):
+        """Convert a PIL Image or numpy array to an RGB uint8 numpy array.
+
+        Raises ValueError if the input is empty or unsupported.
+        """
+        if image is None:
+            raise ValueError("No image provided")
+
+        # PIL Image
+        if isinstance(image, Image.Image):
+            img = image.convert('RGB')
+            arr = np.asarray(img)
+        else:
+            # numpy array-like
+            arr = np.asarray(image)
+
+        if arr.size == 0:
+            raise ValueError("Image array is empty")
+
+        # If grayscale (H, W) -> convert to RGB
+        if arr.ndim == 2:
+            arr = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_GRAY2RGB)
+        elif arr.ndim == 3 and arr.shape[2] == 4:
+            # RGBA -> drop alpha after converting to RGB
+            try:
+                arr = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_RGBA2RGB)
+            except Exception:
+                arr = arr[:, :, :3]
+        elif arr.ndim == 3 and arr.shape[2] == 3:
+            # Heuristic: assume array is RGB if values look like RGB; many OpenCV routines use BGR.
+            # We will leave channel order as-is here and treat these arrays as BGR when explicitly needed.
+            arr = arr.astype(np.uint8)
+        else:
+            raise ValueError("Unsupported image array shape")
+
+        return arr
+
+    def _to_numpy_gray(self, image):
+        """Return a grayscale numpy array (uint8) from PIL Image or numpy array.
+
+        Uses _to_numpy_rgb internally.
+        """
+        rgb = self._to_numpy_rgb(image)
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        if gray.size == 0:
+            raise ValueError("Converted grayscale image is empty")
+        return gray
+
+    def _roi_shape_metrics(self, mask):
+        """Compute simple shape metrics (area, solidity, eccentricity) from a binary mask.
+
+        Returns dict with keys: area, solidity, eccentricity
+        """
+        if mask is None:
+            raise ValueError("Mask is None")
+        arr = np.asarray(mask)
+        if arr.size == 0:
+            return {'area': 0, 'solidity': 0.0, 'eccentricity': 0.0}
+
+        # Ensure binary
+        bw = (arr > 0).astype(np.uint8)
+        contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return {'area': 0, 'solidity': 0.0, 'eccentricity': 0.0}
+
+        # Use the largest contour
+        cnt = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(cnt)
+
+        # Convex hull solidity
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull) if hull is not None else 0
+        solidity = float(area) / hull_area if hull_area > 0 else 0.0
+
+        # Eccentricity from fitted ellipse (if available) or covariance/PCA fallback
+        eccentricity = 0.0
+        try:
+            if cnt.shape[0] >= 5:
+                (cx, cy), (MA, ma), angle = cv2.fitEllipse(cnt)
+                major = max(MA, ma)
+                minor = min(MA, ma)
+                if major > 0:
+                    eccentricity = np.sqrt(max(0.0, 1 - (minor / major) ** 2))
+        except Exception:
+            eccentricity = 0.0
+
+        # If fitEllipse didn't provide a useful eccentricity (e.g., too few points), fallback to PCA on contour points
+        if eccentricity == 0.0:
+            try:
+                pts = cnt.reshape(-1, 2).astype(np.float64)
+                if pts.shape[0] >= 3:
+                    # Center points
+                    mean = pts.mean(axis=0)
+                    centered = pts - mean
+                    cov = np.cov(centered, rowvar=False)
+                    vals, vecs = np.linalg.eigh(cov)
+                    # sort eigenvalues descending
+                    vals = np.sort(vals)[::-1]
+                    if vals[0] > 0 and vals[1] >= 0:
+                        major = np.sqrt(vals[0])
+                        minor = np.sqrt(vals[1]) if vals[1] > 0 else 0.0
+                        if major > 0:
+                            eccentricity = np.sqrt(max(0.0, 1 - (minor / major) ** 2))
+            except Exception:
+                pass
+
+        return {'area': area, 'solidity': solidity, 'eccentricity': eccentricity}
+
+
     def start_pan(self, event):
         self.is_panning = True
         self.pan_start_x = event.x
@@ -525,6 +635,39 @@ class MainWindow(tk.Tk):
         
         print(f"ROI in original coordinates: {roi}")
 
+        # Quick ROI shape appropriateness check
+        try:
+            mask = np.zeros((img_height, img_width), dtype=np.uint8)
+            mask[orig_y1:orig_y2, orig_x1:orig_x2] = 255
+            metrics = self._roi_shape_metrics(mask)
+            # thresholds (tunable)
+            min_area_px = 25 * 25
+            max_eccentricity = 0.95
+            min_solidity = 0.6
+            flagged = False
+            reasons = []
+            if metrics['area'] < min_area_px:
+                flagged = True
+                reasons.append('ROI area too small')
+            if metrics['eccentricity'] > max_eccentricity:
+                flagged = True
+                reasons.append('ROI too elongated')
+            if metrics['solidity'] < min_solidity:
+                flagged = True
+                reasons.append('ROI has irregular shape')
+
+            # Visual cue on canvas rectangle
+            if self.rect:
+                try:
+                    self.canvas.itemconfigure(self.rect, outline='red' if flagged else 'green')
+                except Exception:
+                    pass
+
+            if flagged:
+                messagebox.showwarning('ROI Warning', 'Selected ROI may be inappropriate:\n' + '\n'.join(reasons))
+        except Exception as e:
+            print(f"ROI shape check failed: {e}")
+
         # Get selected file
         selection = self.file_listbox.curselection()
         if not selection:
@@ -636,21 +779,11 @@ class MainWindow(tk.Tk):
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
-        # Convert PIL image to numpy array (RGB)
-        image_np = np.array(self.current_image)
-        if image_np.ndim == 2:
-            # Already grayscale
-            gray_image = image_np
-        elif image_np.ndim == 3 and image_np.shape[2] == 3:
-            # RGB to grayscale
-            gray_image = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-        else:
-            tk.messagebox.showerror("Error", "Unsupported image format for preview.")
-            return
-
-        # Defensive: check for empty image
-        if gray_image is None or gray_image.size == 0:
-            tk.messagebox.showerror("Error", "Failed to load image for preview. Image is empty.")
+        # Defensive conversion: support PIL modes (RGBA, P, CMYK) and numpy arrays
+        try:
+            gray_image = self._to_numpy_gray(self.current_image)
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to prepare image for preview: {e}")
             return
 
         # Create preview window
@@ -921,16 +1054,18 @@ class MainWindow(tk.Tk):
 
         # Create an image from the current display
         try:
-            # Convert the image to RGB
-            pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
+            # Defensive conversion from whatever form current_image is into RGB numpy
+            img_array = self._to_numpy_rgb(self.current_image)
+            pil_image = Image.fromarray(img_array)
             # Save without EXIF data
             pil_image.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
             print(f"Image saved to {filepath}")
         except Exception as e:
             print(f"Export failed: {e}")
-            # Try alternative save method using OpenCV
+            # Try alternative save method using OpenCV (assume img_array available)
             try:
-                cv2.imwrite(filepath, self.current_image)
+                bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(filepath, bgr)
                 print(f"Image saved to {filepath} using alternative method")
             except Exception as e2:
                 print(f"Alternative export failed: {e2}")
