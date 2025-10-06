@@ -80,10 +80,9 @@ def enum_to_str(enum_value: Any) -> str:
     elif isinstance(enum_value, BackgroundCorrectionMethod):
         return {
             BackgroundCorrectionMethod.NONE: "none",
-            BackgroundCorrectionMethod.BASIC: "basic",
-            BackgroundCorrectionMethod.ROLLING_BALL: "rolling_ball",
-            BackgroundCorrectionMethod.RESTORE: "restore",
-            BackgroundCorrectionMethod.HOMOMORPHIC: "homomorphic",
+            BackgroundCorrectionMethod.POLYNOMIAL_SURFACE: "polynomial_surface",
+            BackgroundCorrectionMethod.LARGE_KERNEL_BLUR: "large_kernel_blur",
+            BackgroundCorrectionMethod.COMPLETE_WORKFLOW: "complete_workflow",
         }[enum_value]
     else:
         return str(enum_value)

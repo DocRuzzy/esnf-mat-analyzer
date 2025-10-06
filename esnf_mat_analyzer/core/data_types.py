@@ -203,6 +203,9 @@ class UniformityConfig:
 
     lbp_points: int = 8
     """Number of points for LBP calculation."""
+    
+    max_coefficients: int = 10
+    """Maximum number of coefficients to retain in spectral or multiscale analyses."""
 
 
 @dataclass

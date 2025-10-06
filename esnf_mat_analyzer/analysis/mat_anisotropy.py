@@ -72,6 +72,33 @@ class MatAnisotropyAnalyzer:
         hann_col = np.hanning(cols).reshape(1, -1)
         window = hann_row @ hann_col
         return image * window
+
+    def _safe_weighted_average(self, values: np.ndarray, weights: np.ndarray, default: float = 0.0) -> float:
+        """Compute a weighted average safely.
+
+        Returns `default` if weights sum to zero or are all non-finite. This
+        prevents ZeroDivisionError in np.average when running on uniform or
+        empty spectra. The function also handles NaNs by ignoring them.
+        """
+        try:
+            vals = np.asarray(values, dtype=float)
+            w = np.asarray(weights, dtype=float)
+        except Exception:
+            return default
+
+        # Mask invalid entries
+        valid = np.isfinite(vals) & np.isfinite(w)
+        if not np.any(valid):
+            return default
+
+        vals = vals[valid]
+        w = w[valid]
+
+        wsum = float(np.sum(w))
+        if wsum == 0.0 or not np.isfinite(wsum):
+            return default
+
+        return float(np.sum(vals * w) / wsum)
     
     def _calculate_anisotropy_index(self, power_spectrum: np.ndarray) -> float:
         """
@@ -148,9 +175,9 @@ class MatAnisotropyAnalyzer:
         # Convert to unit vectors and average
         cos_angles = np.cos(2 * angles)  # Factor of 2 for orientation (not direction)
         sin_angles = np.sin(2 * angles)
-        
-        avg_cos = np.average(cos_angles, weights=powers)
-        avg_sin = np.average(sin_angles, weights=powers)
+
+        avg_cos = self._safe_weighted_average(cos_angles, powers)
+        avg_sin = self._safe_weighted_average(sin_angles, powers)
         
         # Convert back to angle
         preferred_angle = 0.5 * np.arctan2(avg_sin, avg_cos)
@@ -187,9 +214,9 @@ class MatAnisotropyAnalyzer:
         # Calculate directional variance using circular statistics
         cos_angles = np.cos(angles)
         sin_angles = np.sin(angles)
-        
-        weighted_cos = np.average(cos_angles, weights=powers)
-        weighted_sin = np.average(sin_angles, weights=powers)
+
+        weighted_cos = self._safe_weighted_average(cos_angles, powers)
+        weighted_sin = self._safe_weighted_average(sin_angles, powers)
         
         # Circular variance (1 - resultant length)
         resultant_length = np.sqrt(weighted_cos**2 + weighted_sin**2)
@@ -222,10 +249,11 @@ class MatAnisotropyAnalyzer:
         # Calculate orientation tensor components
         cos_2theta = np.cos(2 * angles)
         sin_2theta = np.sin(2 * angles)
-        
-        S_xx = np.average(cos_2theta, weights=powers)
-        S_yy = -S_xx  # For 2D orientation tensor, S_yy = -S_xx
-        S_xy = np.average(sin_2theta, weights=powers)
+
+        # Use safe weighted averages to avoid division errors
+        S_xx = self._safe_weighted_average(cos_2theta, powers)
+        S_yy = -S_xx
+        S_xy = self._safe_weighted_average(sin_2theta, powers)
         
         # Orientation strength is the largest eigenvalue
         orientation_strength = 0.5 * np.sqrt((S_xx - S_yy)**2 + 4*S_xy**2)

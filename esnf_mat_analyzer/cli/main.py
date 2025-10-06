@@ -49,6 +49,7 @@ from ..config.config_manager import (
     load_config, save_config, validate_config, 
     get_default_config, generate_default_config_file
 )
+import numpy as np
 
 
 class CLIColors:
@@ -355,6 +356,106 @@ def save_batch_results(
         print_error(f"Failed to save results: {e}")
 
 
+def run_bg_benchmark(analyzer: NanoFiberAnalyzer, input_dir: Path, output_dir: Path, pattern: str = "*.tif", verbose: bool = False) -> Path:
+    """Run background correction benchmarking across available methods and write CSV summary."""
+    import csv
+    from esnf_mat_analyzer.core.data_types import BackgroundCorrectionMethod
+
+    image_files = sorted(list(Path(input_dir).glob(pattern)))
+    if not image_files:
+        raise ValueError(f"No images found in {input_dir} with pattern {pattern}")
+
+    methods = [m for m in BackgroundCorrectionMethod]
+
+    rows = []
+    for img_path in image_files:
+        if verbose:
+            print_info(f"Benchmarking image: {img_path.name}")
+        for method in methods:
+            cfg = get_default_config()
+            cfg.processing.background_correction_method = method
+            analyzer_method = NanoFiberAnalyzer.from_config(cfg)
+            summary = process_single_image(analyzer_method, img_path, verbose=verbose)
+            metrics = summary.get('metrics') or {}
+            row = {
+                'image': str(img_path.name),
+                'method': method.name,
+                'status': summary.get('status'),
+                'processing_time': summary.get('processing_time')
+            }
+            for key in ['overall_mat_uniformity', 'anisotropy_index', 'psd_uniformity']:
+                row[key] = metrics.get(key)
+            rows.append(row)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / 'bg_benchmark_summary.csv'
+    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['image', 'method', 'status', 'processing_time', 'overall_mat_uniformity', 'anisotropy_index', 'psd_uniformity'])
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+    if verbose:
+        print_success(f"Background benchmark summary written to: {csv_path}")
+
+    return csv_path
+
+
+def run_recommendation_batch(analyzer: NanoFiberAnalyzer, input_path: Path, output_dir: Path, pattern: str = "*.tif", verbose: bool = False) -> Path:
+    """Run recommendation across images and write CSV of recommended methods."""
+    import csv
+    from esnf_mat_analyzer.processing.background_correction.recommendation import get_standard_methods, recommend_method
+
+    # Resolve image files
+    if input_path.is_dir():
+        image_files = sorted(list(input_path.glob(pattern)))
+    elif input_path.is_file():
+        image_files = [input_path]
+    else:
+        raise ValueError(f"Invalid input path for recommendation: {input_path}")
+
+    if not image_files:
+        raise ValueError(f"No images found for recommendation in {input_path}")
+
+    methods = get_standard_methods()
+
+    rows = []
+    for img_path in image_files:
+        if verbose:
+            print_info(f"Recommending for: {img_path.name}")
+        try:
+            # Load image as grayscale numpy
+            from PIL import Image
+            img = Image.open(img_path).convert('L')
+            img_np = np.array(img)
+
+            best, scores = recommend_method(img_np, methods, downsample=max(1, min(4, img_np.shape[0] // 128)))
+            row = { 'image': str(img_path.name), 'best': best }
+            for k, v in scores.items():
+                row[f'score_{k}'] = v
+            rows.append(row)
+        except Exception as e:
+            rows.append({'image': str(img_path.name), 'best': '', 'error': str(e)})
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / 'recommendation_summary.csv'
+    # Collect fieldnames
+    fieldnames = set()
+    for r in rows:
+        fieldnames.update(r.keys())
+    fieldnames = list(sorted(fieldnames))
+
+    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+    return csv_path
+
+
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser."""
     parser = argparse.ArgumentParser(
@@ -454,6 +555,27 @@ Examples:
         choices=["json", "csv", "yaml"],
         default="json",
         help="Output format for batch results (default: json)"
+    )
+
+    parser.add_argument(
+        "--export-metrics",
+        type=str,
+        metavar="PATH",
+        help="Export full mat-scale metrics JSON to PATH (single image only)"
+    )
+    
+    parser.add_argument(
+        "--bg-benchmark",
+        type=str,
+        metavar="DIR",
+        help="Run background-method benchmark on images in DIR and write CSV summary to output directory"
+    )
+
+    parser.add_argument(
+        "--recommend",
+        type=str,
+        metavar="DIR_OR_FILE",
+        help="Run background-method recommendation on images in DIR_OR_FILE and write CSV summary to output directory"
     )
     
     # Version information
@@ -563,6 +685,28 @@ def main_cli() -> int:
             print_info("Initializing analyzer...")
         
         analyzer = NanoFiberAnalyzer.from_config(config)
+
+        # If background benchmark requested, run it and exit
+        if args.bg_benchmark:
+            try:
+                out_dir = Path(args.output)
+                csv_path = run_bg_benchmark(analyzer, Path(args.bg_benchmark), out_dir, pattern=args.pattern, verbose=args.verbose)
+                print_success(f"Background benchmark completed: {csv_path}")
+                return 0
+            except Exception as e:
+                print_error(f"Background benchmark failed: {e}")
+                return 1
+
+        # If recommendation requested, run and exit
+        if args.recommend:
+            try:
+                out_dir = Path(args.output)
+                csv_path = run_recommendation_batch(analyzer, Path(args.recommend), out_dir, pattern=args.pattern, verbose=args.verbose)
+                print_success(f"Recommendation summary written: {csv_path}")
+                return 0
+            except Exception as e:
+                print_error(f"Recommendation batch failed: {e}")
+                return 1
         
         # Parse ROI if provided
         roi = None
@@ -590,6 +734,19 @@ def main_cli() -> int:
                     print_warning("Analysis warnings:")
                     for warning in warnings:
                         print(f"  - {warning}")
+                # Export full metrics JSON if requested
+                if args.export_metrics:
+                    try:
+                        export_path = Path(args.export_metrics)
+                        export_path.parent.mkdir(parents=True, exist_ok=True)
+                        # The 'metrics' may be a dataclass or dict-like
+                        metrics_obj = result_summary.get("metrics")
+                        with open(export_path, 'w', encoding='utf-8') as f:
+                            json.dump({"image": str(input_path), "metrics": metrics_obj}, f, indent=2, ensure_ascii=False)
+                        if not args.quiet:
+                            print_success(f"Metrics exported to: {export_path}")
+                    except Exception as e:
+                        print_error(f"Failed to export metrics: {e}")
                 
                 return 0
             else:

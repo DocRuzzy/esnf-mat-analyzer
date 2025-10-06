@@ -11,13 +11,16 @@ import matplotlib.pyplot as plt
 from esnf_mat_analyzer.main import setup_dependencies
 from esnf_mat_analyzer.visualization.visualization import Visualizer
 from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
-from esnf_mat_analyzer.config.config_manager import get_default_config
+from esnf_mat_analyzer.config.config_manager import get_default_config, save_config, load_config
 
 class MainWindow(tk.Tk):
-    def __init__(self):
+    def __init__(self, user_config_path=None):
         super().__init__()
         self.title("Nanofiber Analyzer")
         self.geometry("1100x720")
+
+        # Path where user-specific GUI tunables are saved
+        self.user_config_path = user_config_path
 
         self.selected_files = []
         self.current_image = None
@@ -142,6 +145,91 @@ class MainWindow(tk.Tk):
             command=self.preview_background_methods
         )
         self.preview_bg_button.pack(padx=5, pady=5)
+
+        # Recommend method button (uses composite quality metric)
+        self.recommend_button = ttk.Button(
+            self.bg_method_frame,
+            text="Recommend Method",
+            command=self.recommend_method_ui
+        )
+        self.recommend_button.pack(padx=5, pady=2)
+
+        # --- Method Parameters (advanced) ---
+        # Expose common tunable parameters per background method
+        self.method_params_frame = ttk.LabelFrame(self.analysis_frame, text="Method Parameters (advanced)")
+        self.method_params_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Initialize parameter variables from default config
+        # Load defaults, then override with any persisted user config
+        default_cfg = get_default_config()
+        dp = default_cfg.processing
+        if self.user_config_path:
+            try:
+                loaded = load_config(Path(self.user_config_path))
+                # Copy known processing fields into dp
+                dp.blur_kernel_size = loaded.processing.blur_kernel_size
+                dp.basic_correction_n_components = loaded.processing.basic_correction_n_components
+                dp.rolling_ball_radius = loaded.processing.rolling_ball_radius
+                dp.restore_percentile = loaded.processing.restore_percentile
+                dp.homomorphic_cutoff = loaded.processing.homomorphic_cutoff
+                dp.homomorphic_g_low = loaded.processing.homomorphic_g_low
+                dp.homomorphic_g_high = loaded.processing.homomorphic_g_high
+            except Exception:
+                # Ignore load errors and continue with defaults
+                pass
+
+        self.blur_kernel_var = tk.IntVar(value=dp.blur_kernel_size)
+        self.basic_ncomp_var = tk.IntVar(value=dp.basic_correction_n_components)
+        self.rolling_radius_var = tk.IntVar(value=dp.rolling_ball_radius)
+        self.restore_percentile_var = tk.DoubleVar(value=dp.restore_percentile)
+        self.homomorphic_cutoff_var = tk.DoubleVar(value=dp.homomorphic_cutoff)
+        self.homomorphic_g_low_var = tk.DoubleVar(value=dp.homomorphic_g_low)
+        self.homomorphic_g_high_var = tk.DoubleVar(value=dp.homomorphic_g_high)
+
+        # Trace changes to variables to persist them automatically
+        for var in (self.blur_kernel_var, self.basic_ncomp_var, self.rolling_radius_var,
+                    self.restore_percentile_var, self.homomorphic_cutoff_var,
+                    self.homomorphic_g_low_var, self.homomorphic_g_high_var):
+            try:
+                var.trace_add('write', lambda *args: self._save_user_params())
+            except Exception:
+                # Older tkinter versions may use trace; fallback
+                try:
+                    var.trace('w', lambda *args: self._save_user_params())
+                except Exception:
+                    pass
+
+        # General blur kernel control (used by some preprocessing steps)
+        self._params_general_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_general_frame, text="Gaussian Blur Kernel (odd, 0=disabled):").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(self._params_general_frame, from_=0, to=101, increment=2, textvariable=self.blur_kernel_var, width=6).pack(side=tk.LEFT, padx=5)
+
+        # BASIC parameters
+        self._params_basic_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_basic_frame, text="BaSiC n_components:").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(self._params_basic_frame, from_=1, to=10, textvariable=self.basic_ncomp_var, width=6).pack(side=tk.LEFT, padx=5)
+
+        # Rolling ball parameters
+        self._params_rolling_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_rolling_frame, text="Rolling Ball Radius (px):").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(self._params_rolling_frame, from_=1, to=1000, textvariable=self.rolling_radius_var, width=6).pack(side=tk.LEFT, padx=5)
+
+        # RESTORE parameters
+        self._params_restore_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_restore_frame, text="RESTORE Percentile (0-100):").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(self._params_restore_frame, from_=0.1, to=99.9, increment=0.1, textvariable=self.restore_percentile_var, width=6).pack(side=tk.LEFT, padx=5)
+
+        # Homomorphic parameters
+        self._params_homomorphic_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_homomorphic_frame, text="Homomorphic Cutoff:").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(self._params_homomorphic_frame, from_=1, to=1000, textvariable=self.homomorphic_cutoff_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self._params_homomorphic_frame, text="g_low:").pack(side=tk.LEFT, padx=5)
+        ttk.Entry(self._params_homomorphic_frame, textvariable=self.homomorphic_g_low_var, width=6).pack(side=tk.LEFT, padx=2)
+        ttk.Label(self._params_homomorphic_frame, text="g_high:").pack(side=tk.LEFT, padx=5)
+        ttk.Entry(self._params_homomorphic_frame, textvariable=self.homomorphic_g_high_var, width=6).pack(side=tk.LEFT, padx=2)
+
+        # Initially show general params only
+        self._show_method_params()
 
         # Thickness model selection
         self.thickness_model_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Model")
@@ -365,116 +453,6 @@ class MainWindow(tk.Tk):
         if hasattr(self, 'scale_bar_length_mm'):
             self.draw_scale_bar()
 
-    # --- Image conversion helpers (defensive) ---
-    def _to_numpy_rgb(self, image):
-        """Convert a PIL Image or numpy array to an RGB uint8 numpy array.
-
-        Raises ValueError if the input is empty or unsupported.
-        """
-        if image is None:
-            raise ValueError("No image provided")
-
-        # PIL Image
-        if isinstance(image, Image.Image):
-            img = image.convert('RGB')
-            arr = np.asarray(img)
-        else:
-            # numpy array-like
-            arr = np.asarray(image)
-
-        if arr.size == 0:
-            raise ValueError("Image array is empty")
-
-        # If grayscale (H, W) -> convert to RGB
-        if arr.ndim == 2:
-            arr = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_GRAY2RGB)
-        elif arr.ndim == 3 and arr.shape[2] == 4:
-            # RGBA -> drop alpha after converting to RGB
-            try:
-                arr = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_RGBA2RGB)
-            except Exception:
-                arr = arr[:, :, :3]
-        elif arr.ndim == 3 and arr.shape[2] == 3:
-            # Heuristic: assume array is RGB if values look like RGB; many OpenCV routines use BGR.
-            # We will leave channel order as-is here and treat these arrays as BGR when explicitly needed.
-            arr = arr.astype(np.uint8)
-        else:
-            raise ValueError("Unsupported image array shape")
-
-        return arr
-
-    def _to_numpy_gray(self, image):
-        """Return a grayscale numpy array (uint8) from PIL Image or numpy array.
-
-        Uses _to_numpy_rgb internally.
-        """
-        rgb = self._to_numpy_rgb(image)
-        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        if gray.size == 0:
-            raise ValueError("Converted grayscale image is empty")
-        return gray
-
-    def _roi_shape_metrics(self, mask):
-        """Compute simple shape metrics (area, solidity, eccentricity) from a binary mask.
-
-        Returns dict with keys: area, solidity, eccentricity
-        """
-        if mask is None:
-            raise ValueError("Mask is None")
-        arr = np.asarray(mask)
-        if arr.size == 0:
-            return {'area': 0, 'solidity': 0.0, 'eccentricity': 0.0}
-
-        # Ensure binary
-        bw = (arr > 0).astype(np.uint8)
-        contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return {'area': 0, 'solidity': 0.0, 'eccentricity': 0.0}
-
-        # Use the largest contour
-        cnt = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(cnt)
-
-        # Convex hull solidity
-        hull = cv2.convexHull(cnt)
-        hull_area = cv2.contourArea(hull) if hull is not None else 0
-        solidity = float(area) / hull_area if hull_area > 0 else 0.0
-
-        # Eccentricity from fitted ellipse (if available) or covariance/PCA fallback
-        eccentricity = 0.0
-        try:
-            if cnt.shape[0] >= 5:
-                (cx, cy), (MA, ma), angle = cv2.fitEllipse(cnt)
-                major = max(MA, ma)
-                minor = min(MA, ma)
-                if major > 0:
-                    eccentricity = np.sqrt(max(0.0, 1 - (minor / major) ** 2))
-        except Exception:
-            eccentricity = 0.0
-
-        # If fitEllipse didn't provide a useful eccentricity (e.g., too few points), fallback to PCA on contour points
-        if eccentricity == 0.0:
-            try:
-                pts = cnt.reshape(-1, 2).astype(np.float64)
-                if pts.shape[0] >= 3:
-                    # Center points
-                    mean = pts.mean(axis=0)
-                    centered = pts - mean
-                    cov = np.cov(centered, rowvar=False)
-                    vals, vecs = np.linalg.eigh(cov)
-                    # sort eigenvalues descending
-                    vals = np.sort(vals)[::-1]
-                    if vals[0] > 0 and vals[1] >= 0:
-                        major = np.sqrt(vals[0])
-                        minor = np.sqrt(vals[1]) if vals[1] > 0 else 0.0
-                        if major > 0:
-                            eccentricity = np.sqrt(max(0.0, 1 - (minor / major) ** 2))
-            except Exception:
-                pass
-
-        return {'area': area, 'solidity': solidity, 'eccentricity': eccentricity}
-
-
     def start_pan(self, event):
         self.is_panning = True
         self.pan_start_x = event.x
@@ -635,39 +613,6 @@ class MainWindow(tk.Tk):
         
         print(f"ROI in original coordinates: {roi}")
 
-        # Quick ROI shape appropriateness check
-        try:
-            mask = np.zeros((img_height, img_width), dtype=np.uint8)
-            mask[orig_y1:orig_y2, orig_x1:orig_x2] = 255
-            metrics = self._roi_shape_metrics(mask)
-            # thresholds (tunable)
-            min_area_px = 25 * 25
-            max_eccentricity = 0.95
-            min_solidity = 0.6
-            flagged = False
-            reasons = []
-            if metrics['area'] < min_area_px:
-                flagged = True
-                reasons.append('ROI area too small')
-            if metrics['eccentricity'] > max_eccentricity:
-                flagged = True
-                reasons.append('ROI too elongated')
-            if metrics['solidity'] < min_solidity:
-                flagged = True
-                reasons.append('ROI has irregular shape')
-
-            # Visual cue on canvas rectangle
-            if self.rect:
-                try:
-                    self.canvas.itemconfigure(self.rect, outline='red' if flagged else 'green')
-                except Exception:
-                    pass
-
-            if flagged:
-                messagebox.showwarning('ROI Warning', 'Selected ROI may be inappropriate:\n' + '\n'.join(reasons))
-        except Exception as e:
-            print(f"ROI shape check failed: {e}")
-
         # Get selected file
         selection = self.file_listbox.curselection()
         if not selection:
@@ -770,8 +715,56 @@ class MainWindow(tk.Tk):
 
     def on_bg_method_change(self):
         """Called when background correction method is changed."""
-        # Optional: Could show a brief description or update UI
-        pass
+        # Update visible method-specific parameters when background method changes
+        self._show_method_params()
+
+    def _show_method_params(self):
+        """Show/hide parameter frames depending on selected background method."""
+        # Clear existing packed frames
+        for f in (self._params_general_frame,
+                  self._params_basic_frame,
+                  self._params_rolling_frame,
+                  self._params_restore_frame,
+                  self._params_homomorphic_frame):
+            try:
+                f.pack_forget()
+            except Exception:
+                pass
+
+        # Always show general params
+        self._params_general_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        method = self.bg_method_var.get()
+        if method == "basic":
+            self._params_basic_frame.pack(fill=tk.X, padx=5, pady=2)
+        elif method == "rolling_ball":
+            self._params_rolling_frame.pack(fill=tk.X, padx=5, pady=2)
+        elif method == "restore":
+            self._params_restore_frame.pack(fill=tk.X, padx=5, pady=2)
+        elif method == "homomorphic":
+            self._params_homomorphic_frame.pack(fill=tk.X, padx=5, pady=2)
+
+    def _save_user_params(self):
+        """Save current method parameter values to user_config_path if provided."""
+        if not self.user_config_path:
+            return
+
+        try:
+            cfg = get_default_config()
+            p = cfg.processing
+            # Write current GUI-controlled params
+            p.blur_kernel_size = int(self.blur_kernel_var.get())
+            p.basic_correction_n_components = int(self.basic_ncomp_var.get())
+            p.rolling_ball_radius = int(self.rolling_radius_var.get())
+            p.restore_percentile = float(self.restore_percentile_var.get())
+            p.homomorphic_cutoff = float(self.homomorphic_cutoff_var.get())
+            p.homomorphic_g_low = float(self.homomorphic_g_low_var.get())
+            p.homomorphic_g_high = float(self.homomorphic_g_high_var.get())
+
+            save_config(cfg, Path(self.user_config_path))
+        except Exception:
+            # Do not raise in UI; log if needed
+            pass
 
     def preview_background_methods(self):
         """Show a comparison of different background correction methods."""
@@ -779,11 +772,21 @@ class MainWindow(tk.Tk):
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
-        # Defensive conversion: support PIL modes (RGBA, P, CMYK) and numpy arrays
-        try:
-            gray_image = self._to_numpy_gray(self.current_image)
-        except Exception as e:
-            tk.messagebox.showerror("Error", f"Failed to prepare image for preview: {e}")
+        # Convert PIL image to numpy array (RGB)
+        image_np = np.array(self.current_image)
+        if image_np.ndim == 2:
+            # Already grayscale
+            gray_image = image_np
+        elif image_np.ndim == 3 and image_np.shape[2] == 3:
+            # RGB to grayscale
+            gray_image = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+        else:
+            tk.messagebox.showerror("Error", "Unsupported image format for preview.")
+            return
+
+        # Defensive: check for empty image
+        if gray_image is None or gray_image.size == 0:
+            tk.messagebox.showerror("Error", "Failed to load image for preview. Image is empty.")
             return
 
         # Create preview window
@@ -883,6 +886,63 @@ class MainWindow(tk.Tk):
         from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
         processor = AdvancedBackgroundProcessor()
         return processor.homomorphic_filter(image, 30, 0.5, 2.0)
+
+    def recommend_method_ui(self):
+        """Run a lightweight recommendation across available methods and show suggestion."""
+        try:
+            if not self.current_image:
+                tk.messagebox.showwarning("Warning", "Please select an image first.")
+                return
+
+            # Convert PIL to grayscale numpy
+            img_np = np.array(self.current_image.convert('L'))
+
+            # Use session cache to avoid recomputing on repeated clicks
+            if not hasattr(self, '_recommend_cache'):
+                self._recommend_cache = {}
+
+            cache_key = (img_np.shape, img_np.mean())
+            if cache_key in self._recommend_cache:
+                best, scores = self._recommend_cache[cache_key]
+            else:
+                # Show a tiny progress window
+                prog = tk.Toplevel(self)
+                prog.title('Recommending...')
+                ttk.Label(prog, text='Computing recommendation, please wait...').pack(padx=10, pady=10)
+                prog.update_idletasks()
+
+                # Build methods dict (use the same small functions as preview)
+                methods = {
+                    'none': self._apply_default_correction,
+                    'basic': self._apply_basic_correction,
+                    'rolling_ball': self._apply_rolling_ball_correction,
+                    'restore': self._apply_restore_correction,
+                    'homomorphic': self._apply_homomorphic_correction
+                }
+
+                from esnf_mat_analyzer.processing.background_correction.recommendation import recommend_method
+
+                best, scores = recommend_method(img_np, methods, downsample=max(1, min(4, img_np.shape[0] // 128)))
+                self._recommend_cache[cache_key] = (best, scores)
+
+                try:
+                    prog.destroy()
+                except Exception:
+                    pass
+
+            if not best:
+                tk.messagebox.showinfo("Recommendation", "No recommendation could be made.")
+                return
+
+            # Show scores in a simple messagebox
+            text = f"Recommended method: {best}\n\nScores:\n"
+            for k, v in sorted(scores.items(), key=lambda kv: kv[1], reverse=True):
+                text += f"  {k}: {v:.3f}\n"
+
+            tk.messagebox.showinfo("Background Method Recommendation", text)
+
+        except Exception as e:
+            tk.messagebox.showerror("Recommendation Error", f"Recommendation failed: {e}")
 
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""
@@ -1012,6 +1072,29 @@ class MainWindow(tk.Tk):
             
             # Apply other settings
             config.processing.leveling.enabled = self.background_leveling_var.get()
+            # Apply GUI-tunable processing parameters
+            try:
+                config.processing.blur_kernel_size = int(self.blur_kernel_var.get())
+            except Exception:
+                pass
+            try:
+                config.processing.basic_correction_n_components = int(self.basic_ncomp_var.get())
+            except Exception:
+                pass
+            try:
+                config.processing.rolling_ball_radius = int(self.rolling_radius_var.get())
+            except Exception:
+                pass
+            try:
+                config.processing.restore_percentile = float(self.restore_percentile_var.get())
+            except Exception:
+                pass
+            try:
+                config.processing.homomorphic_cutoff = float(self.homomorphic_cutoff_var.get())
+                config.processing.homomorphic_g_low = float(self.homomorphic_g_low_var.get())
+                config.processing.homomorphic_g_high = float(self.homomorphic_g_high_var.get())
+            except Exception:
+                pass
 
             # Get selected file path
             selection = self.file_listbox.curselection()
@@ -1026,9 +1109,39 @@ class MainWindow(tk.Tk):
 
             # Run analysis
             print(f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}")
+            # First attempt: let analyzer try to auto-detect ruler if spatial scale not provided
             self.last_analysis_result = analyzer.process_image(
                 Path(filepath), roi=roi, spatial_scale_pixels_per_mm=self.spatial_scale
             )
+
+            # If ruler detection failed and config expects ruler detection, prompt user for manual scale
+            if (self.last_analysis_result.spatial_scale_pixels_per_mm is None
+                    and getattr(config, 'ruler_detection', None) is not None
+                    and config.ruler_detection.enabled):
+                # Ask user for manual scale (pixels per mm)
+                manual_scale = simpledialog.askfloat(
+                    "Manual Spatial Scale",
+                    "Ruler not detected automatically. Enter spatial scale in pixels/mm (or Cancel to continue without scale):",
+                    minvalue=0.0
+                )
+
+                if manual_scale and manual_scale > 0:
+                    # Re-run analysis with manual scale
+                    if not self.background_leveling_var.get():
+                        # Ensure settings are applied consistently
+                        config.processing.leveling.enabled = self.background_leveling_var.get()
+                    try:
+                        self.last_analysis_result = analyzer.process_image(
+                            Path(filepath), roi=roi, spatial_scale_pixels_per_mm=float(manual_scale)
+                        )
+                        print(f"Analysis re-run with manual scale: {manual_scale} pixels/mm")
+                    except Exception as e:
+                        print(f"Re-run with manual scale failed: {e}")
+                        messagebox.showerror("Analysis Error", f"Re-run with manual scale failed: {e}")
+                else:
+                    # User cancelled or entered invalid value; notify and continue without scale
+                    messagebox.showwarning("Scale Missing", "No spatial scale set. Results will lack real-world calibration.")
+
             print("Analysis complete.")
 
             # Display results
@@ -1054,18 +1167,16 @@ class MainWindow(tk.Tk):
 
         # Create an image from the current display
         try:
-            # Defensive conversion from whatever form current_image is into RGB numpy
-            img_array = self._to_numpy_rgb(self.current_image)
-            pil_image = Image.fromarray(img_array)
+            # Convert the image to RGB
+            pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
             # Save without EXIF data
             pil_image.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
             print(f"Image saved to {filepath}")
         except Exception as e:
             print(f"Export failed: {e}")
-            # Try alternative save method using OpenCV (assume img_array available)
+            # Try alternative save method using OpenCV
             try:
-                bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                cv2.imwrite(filepath, bgr)
+                cv2.imwrite(filepath, self.current_image)
                 print(f"Image saved to {filepath} using alternative method")
             except Exception as e2:
                 print(f"Alternative export failed: {e2}")

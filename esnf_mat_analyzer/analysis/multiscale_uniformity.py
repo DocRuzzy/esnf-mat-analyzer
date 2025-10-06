@@ -80,8 +80,12 @@ class MultiScaleUniformityAnalyzer:
         """
         try:
             import pywt
-        except ImportError:
-            # Fallback to simple multi-resolution analysis
+        except Exception as exc:
+            # Fallback to simple multi-resolution analysis on import error or
+            # if pywt raises unexpected exceptions during import.
+            self.logger.warning(
+                f"PyWavelets unavailable or import failed ({exc}), using fallback multiscale analysis"
+            )
             return self._fallback_multiscale_analysis(thickness_map, roi_mask)
 
         # Use instance default if not provided
@@ -270,18 +274,23 @@ class MultiScaleUniformityAnalyzer:
                             f"Scale {level}: Zero mean case, std={std_val:.6f}, uniformity={uniformity_value:.6f}"
                         )
             else:
-                # For detail coefficients (scales 1-4), use normalized standard deviation
-                # Detail coefficients represent texture variations, edges, and local features
-                # They often have near-zero means, making CV unstable
-                # Use range-normalized std to measure variation relative to coefficient range
-                data_range = np.max(valid_data) - np.min(valid_data)
+                # For detail coefficients (scales 1-4), use percentile-based range
+                # to make the metric robust to outliers. Use the 2nd-98th percentile
+                # as an effective data-range estimator.
+                try:
+                    p_lo = np.percentile(valid_data, 2.0)
+                    p_hi = np.percentile(valid_data, 98.0)
+                    data_range = float(p_hi - p_lo)
+                except Exception:
+                    data_range = float(np.max(valid_data) - np.min(valid_data))
+
                 if data_range > 1e-12:
-                    # Normalized standard deviation: std relative to data range
+                    # Normalized standard deviation: std relative to percentile range
                     normalized_std = std_val / data_range
                     # Convert to uniformity score: lower variation = higher uniformity
                     uniformity_value = 1.0 / (1.0 + normalized_std)
                     self.logger.debug(
-                        f"Scale {level}: range={data_range:.6f}, norm_std={normalized_std:.6f}, uniformity={uniformity_value:.6f}"
+                        f"Scale {level}: p_range={data_range:.6f}, norm_std={normalized_std:.6f}, uniformity={uniformity_value:.6f}"
                     )
                 else:
                     # All values are essentially identical - perfect uniformity
