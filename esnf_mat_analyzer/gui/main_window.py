@@ -12,6 +12,7 @@ from esnf_mat_analyzer.main import setup_dependencies
 from esnf_mat_analyzer.visualization.visualization import Visualizer
 from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
 from esnf_mat_analyzer.config.config_manager import get_default_config, save_config, load_config
+import yaml
 
 class MainWindow(tk.Tk):
     def __init__(self, user_config_path=None):
@@ -178,6 +179,23 @@ class MainWindow(tk.Tk):
                 # Ignore load errors and continue with defaults
                 pass
 
+        # Recommendation metric weights (dyn, sig, sat) — allow persistence via user config
+        # Default weights mirror those used in recommendation.score_correction
+        rec_dyn = 0.4
+        rec_sig = 0.4
+        rec_sat = 0.2
+        if self.user_config_path:
+            try:
+                loaded = load_config(Path(self.user_config_path))
+                # Expect a top-level 'recommendation' mapping in user config saved by this GUI
+                if hasattr(loaded, 'recommendation') and getattr(loaded, 'recommendation') is not None:
+                    rcfg = loaded.recommendation
+                    rec_dyn = float(getattr(rcfg, 'dyn', rec_dyn)) if hasattr(rcfg, 'dyn') else rec_dyn
+                    rec_sig = float(getattr(rcfg, 'sig', rec_sig)) if hasattr(rcfg, 'sig') else rec_sig
+                    rec_sat = float(getattr(rcfg, 'sat', rec_sat)) if hasattr(rcfg, 'sat') else rec_sat
+            except Exception:
+                pass
+
         self.blur_kernel_var = tk.IntVar(value=dp.blur_kernel_size)
         self.basic_ncomp_var = tk.IntVar(value=dp.basic_correction_n_components)
         self.rolling_radius_var = tk.IntVar(value=dp.rolling_ball_radius)
@@ -186,10 +204,16 @@ class MainWindow(tk.Tk):
         self.homomorphic_g_low_var = tk.DoubleVar(value=dp.homomorphic_g_low)
         self.homomorphic_g_high_var = tk.DoubleVar(value=dp.homomorphic_g_high)
 
+        # Recommendation weight variables
+        self.rec_dyn_var = tk.DoubleVar(value=rec_dyn)
+        self.rec_sig_var = tk.DoubleVar(value=rec_sig)
+        self.rec_sat_var = tk.DoubleVar(value=rec_sat)
+
         # Trace changes to variables to persist them automatically
         for var in (self.blur_kernel_var, self.basic_ncomp_var, self.rolling_radius_var,
                     self.restore_percentile_var, self.homomorphic_cutoff_var,
-                    self.homomorphic_g_low_var, self.homomorphic_g_high_var):
+                    self.homomorphic_g_low_var, self.homomorphic_g_high_var,
+                    self.rec_dyn_var, self.rec_sig_var, self.rec_sat_var):
             try:
                 var.trace_add('write', lambda *args: self._save_user_params())
             except Exception:
@@ -230,6 +254,16 @@ class MainWindow(tk.Tk):
 
         # Initially show general params only
         self._show_method_params()
+
+        # Add a small recommendation weights frame below method parameters
+        self._params_recommend_frame = ttk.Frame(self.method_params_frame)
+        ttk.Label(self._params_recommend_frame, text="Recommendation weights (dyn/sig/sat):").pack(side=tk.LEFT, padx=5)
+        # Use scales to allow user-friendly tuning
+        ttk.Scale(self._params_recommend_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.rec_dyn_var, length=120).pack(side=tk.LEFT, padx=3)
+        ttk.Scale(self._params_recommend_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.rec_sig_var, length=120).pack(side=tk.LEFT, padx=3)
+        ttk.Scale(self._params_recommend_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.rec_sat_var, length=120).pack(side=tk.LEFT, padx=3)
+        ttk.Button(self._params_recommend_frame, text="Normalize", command=lambda: self._normalize_recommend_weights()).pack(side=tk.LEFT, padx=5)
+        self._params_recommend_frame.pack(fill=tk.X, padx=5, pady=4)
 
         # Thickness model selection
         self.thickness_model_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Model")
@@ -761,7 +795,25 @@ class MainWindow(tk.Tk):
             p.homomorphic_g_low = float(self.homomorphic_g_low_var.get())
             p.homomorphic_g_high = float(self.homomorphic_g_high_var.get())
 
+            # Persist core processing config
             save_config(cfg, Path(self.user_config_path))
+
+            # Additionally persist recommendation weights to a small companion YAML mapping
+            try:
+                rec_cfg = {
+                    'dyn': float(self.rec_dyn_var.get()),
+                    'sig': float(self.rec_sig_var.get()),
+                    'sat': float(self.rec_sat_var.get())
+                }
+                # Write a lightweight YAML file alongside the config to avoid modifying core schema
+                ppath = Path(self.user_config_path)
+                companion = ppath.parent / (ppath.stem + ".recommendation.yaml")
+                with open(companion, 'w') as f:
+                    yaml.safe_dump({'recommendation': rec_cfg}, f)
+            except Exception:
+                # ignore companion write errors
+                pass
+
         except Exception:
             # Do not raise in UI; log if needed
             pass
@@ -922,7 +974,14 @@ class MainWindow(tk.Tk):
 
                 from esnf_mat_analyzer.processing.background_correction.recommendation import recommend_method
 
-                best, scores = recommend_method(img_np, methods, downsample=max(1, min(4, img_np.shape[0] // 128)))
+                # Build weights from GUI variables
+                weights = {
+                    'dyn': float(self.rec_dyn_var.get()),
+                    'sig': float(self.rec_sig_var.get()),
+                    'sat': float(self.rec_sat_var.get())
+                }
+
+                best, scores = recommend_method(img_np, methods, weights=weights, downsample=max(1, min(4, img_np.shape[0] // 128)))
                 self._recommend_cache[cache_key] = (best, scores)
 
                 try:
@@ -943,6 +1002,23 @@ class MainWindow(tk.Tk):
 
         except Exception as e:
             tk.messagebox.showerror("Recommendation Error", f"Recommendation failed: {e}")
+
+    def _normalize_recommend_weights(self):
+        """Normalize the recommendation weight sliders so they sum to 1.0 (if possible)."""
+        try:
+            vals = [float(self.rec_dyn_var.get()), float(self.rec_sig_var.get()), float(self.rec_sat_var.get())]
+            s = sum(vals)
+            if s <= 0:
+                # reset to defaults
+                self.rec_dyn_var.set(0.4)
+                self.rec_sig_var.set(0.4)
+                self.rec_sat_var.set(0.2)
+                return
+            self.rec_dyn_var.set(vals[0] / s)
+            self.rec_sig_var.set(vals[1] / s)
+            self.rec_sat_var.set(vals[2] / s)
+        except Exception:
+            pass
 
     def _get_correction_stats(self, original, corrected):
         """Get statistical comparison of correction methods."""

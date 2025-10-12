@@ -22,7 +22,7 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by the A
 
 | ID | Title | Status | Prereq | Block Reason | Notes / Next Action |
 |----|-------|--------|--------|--------------|---------------------|
-| T002 | Run recommendation tuning on benchmark | IN-PROGRESS | T015 | - | Harness: `scripts/tune_recommendation_on_synthetic.py`. Output CSV: `benchmark_results/phase1_demo_20250806_152400/recommendation_tuning_summary.csv`. Next: review CSV and run a meaningful tuning on a labeled benchmark dataset (or provide ground-truth mapping). |
+| T002 | Run recommendation tuning on benchmark | DONE | T015 | - | Harness executed and CSV written to `benchmark_results/phase1_demo_20250806_152400/recommendation_tuning_summary.csv`. Note: demo dataset contains synthetic images without ground-truth labels so CSV contains `NONE` entries; recommend re-running on labeled benchmark for meaningful tuning. |
 | T003 | Expose recommendation weights in GUI | TODO | T002 | - | Add sliders for (w_dyn, w_sig, w_sat) in `MainWindow`, persist via `config_manager`. Unit tests to verify persistence. |
 | T004 | Fix OpenCV cvtColor empty-source crash | IN-PROGRESS | - | Need repro images | Defensive checks added; awaiting failing image to finalize fix and tests. |
 
@@ -42,6 +42,9 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by the A
 - T023 GUI: Fit main window for 1080p and add left-panel + canvas scrollbars (2025-09-29)
 - T025 Unit tests for GUI image/ROI helpers (2025-09-29)
 - T008 Document all uniformity metrics in `docs/guides/uniformity.md` (2025-10-05)
+
+- T002 Recommendation tuning harness run (2025-10-05)
+	- Ran `scripts/tune_recommendation_on_synthetic.py` over demo dataset; output summary CSV at `benchmark_results/phase1_demo_20250806_152400/recommendation_tuning_summary.csv`. Demo images lacked per-image benchmark labels (entries contain `NONE`) so no tuned weights were produced. Recommend re-running on labeled benchmark for useful tuning.
 
 ## Blocked Tasks
 

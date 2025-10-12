@@ -50,7 +50,7 @@ def _signal_preservation(orig: np.ndarray, corr: np.ndarray, mask: Optional[np.n
         return 0.0
 
 
-def score_correction(orig: np.ndarray, corr: np.ndarray, mask: Optional[np.ndarray] = None) -> float:
+def score_correction(orig: np.ndarray, corr: np.ndarray, mask: Optional[np.ndarray] = None, weights: Optional[dict] = None) -> float:
     """Return a composite score in [0,1] where higher is better.
 
     Components:
@@ -72,13 +72,32 @@ def score_correction(orig: np.ndarray, corr: np.ndarray, mask: Optional[np.ndarr
     dyn_score = _dynamic_range_preservation(orig_arr, corr_arr)
     sig_score = _signal_preservation(orig_arr, corr_arr, mask)
 
+    # Allow caller to override weights via a dict: {'dyn':..., 'sig':..., 'sat':...}
+    if weights is None:
+        w_dyn = 0.4
+        w_sig = 0.4
+        w_sat = 0.2
+    else:
+        try:
+            w_dyn = float(weights.get('dyn', 0.4))
+        except Exception:
+            w_dyn = 0.4
+        try:
+            w_sig = float(weights.get('sig', 0.4))
+        except Exception:
+            w_sig = 0.4
+        try:
+            w_sat = float(weights.get('sat', 0.2))
+        except Exception:
+            w_sat = 0.2
+
     # Weighted sum
-    score = 0.4 * dyn_score + 0.4 * sig_score + 0.2 * sat_score
+    score = w_dyn * dyn_score + w_sig * sig_score + w_sat * sat_score
     # Clamp
     return float(max(0.0, min(1.0, score)))
 
 
-def recommend_method(orig: np.ndarray, methods: Dict[str, Callable[[np.ndarray], np.ndarray]], mask: Optional[np.ndarray] = None, downsample: Optional[int] = 1) -> Tuple[str, Dict[str, float]]:
+def recommend_method(orig: np.ndarray, methods: Dict[str, Callable[[np.ndarray], np.ndarray]], mask: Optional[np.ndarray] = None, weights: Optional[dict] = None, downsample: Optional[int] = 1) -> Tuple[str, Dict[str, float]]:
     """Apply each method to orig and score; return best method id and score map.
 
     Args:
@@ -107,7 +126,7 @@ def recommend_method(orig: np.ndarray, methods: Dict[str, Callable[[np.ndarray],
     for mid, func in methods.items():
         try:
             corr = func(orig_small)
-            sc = score_correction(orig_small, corr, mask_small)
+            sc = score_correction(orig_small, corr, mask_small, weights=weights)
             scores[mid] = sc
         except Exception:
             scores[mid] = 0.0
