@@ -91,6 +91,10 @@ class MainWindow(tk.Tk):
         )
         self.select_button.pack(side=tk.TOP, padx=5, pady=5)
 
+        # Help button (opens consolidated help dialog)
+        self.help_button = ttk.Button(self.file_frame, text="Help", command=self.show_help)
+        self.help_button.pack(side=tk.TOP, padx=5, pady=(0,6))
+
         self.file_listbox = tk.Listbox(self.file_frame, selectmode=tk.SINGLE)
         self.file_listbox.pack(side=tk.TOP, fill=tk.X, expand=True, padx=5, pady=5)
         self.file_listbox.bind("<<ListboxSelect>>", self.on_file_select)
@@ -227,21 +231,25 @@ class MainWindow(tk.Tk):
         self._params_general_frame = ttk.Frame(self.method_params_frame)
         ttk.Label(self._params_general_frame, text="Gaussian Blur Kernel (odd, 0=disabled):").pack(side=tk.LEFT, padx=5)
         ttk.Spinbox(self._params_general_frame, from_=0, to=101, increment=2, textvariable=self.blur_kernel_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self._params_general_frame, text="Blur smooths small noise; 0 disables. Use odd kernel sizes.", foreground="#444").pack(side=tk.LEFT, padx=8)
 
         # BASIC parameters
         self._params_basic_frame = ttk.Frame(self.method_params_frame)
         ttk.Label(self._params_basic_frame, text="BaSiC n_components:").pack(side=tk.LEFT, padx=5)
         ttk.Spinbox(self._params_basic_frame, from_=1, to=10, textvariable=self.basic_ncomp_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self._params_basic_frame, text="BaSiC components: more captures complex background but may remove signal.", foreground="#444").pack(side=tk.LEFT, padx=8)
 
         # Rolling ball parameters
         self._params_rolling_frame = ttk.Frame(self.method_params_frame)
         ttk.Label(self._params_rolling_frame, text="Rolling Ball Radius (px):").pack(side=tk.LEFT, padx=5)
         ttk.Spinbox(self._params_rolling_frame, from_=1, to=1000, textvariable=self.rolling_radius_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self._params_rolling_frame, text="Rolling-ball radius (px): larger removes broader illumination.", foreground="#444").pack(side=tk.LEFT, padx=8)
 
         # RESTORE parameters
         self._params_restore_frame = ttk.Frame(self.method_params_frame)
         ttk.Label(self._params_restore_frame, text="RESTORE Percentile (0-100):").pack(side=tk.LEFT, padx=5)
         ttk.Spinbox(self._params_restore_frame, from_=0.1, to=99.9, increment=0.1, textvariable=self.restore_percentile_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(self._params_restore_frame, text="RESTORE percentile tunes background/foreground bias; start small.", foreground="#444").pack(side=tk.LEFT, padx=8)
 
         # Homomorphic parameters
         self._params_homomorphic_frame = ttk.Frame(self.method_params_frame)
@@ -251,6 +259,7 @@ class MainWindow(tk.Tk):
         ttk.Entry(self._params_homomorphic_frame, textvariable=self.homomorphic_g_low_var, width=6).pack(side=tk.LEFT, padx=2)
         ttk.Label(self._params_homomorphic_frame, text="g_high:").pack(side=tk.LEFT, padx=5)
         ttk.Entry(self._params_homomorphic_frame, textvariable=self.homomorphic_g_high_var, width=6).pack(side=tk.LEFT, padx=2)
+        ttk.Label(self._params_homomorphic_frame, text="Cutoff/gain control frequency filtering; adjust to balance contrast/noise.", foreground="#444").pack(side=tk.LEFT, padx=8)
 
         # Initially show general params only
         self._show_method_params()
@@ -264,6 +273,7 @@ class MainWindow(tk.Tk):
         ttk.Scale(self._params_recommend_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.rec_sat_var, length=120).pack(side=tk.LEFT, padx=3)
         ttk.Button(self._params_recommend_frame, text="Normalize", command=lambda: self._normalize_recommend_weights()).pack(side=tk.LEFT, padx=5)
         self._params_recommend_frame.pack(fill=tk.X, padx=5, pady=4)
+        ttk.Label(self.method_params_frame, text="Recommendation weights control the recommender trade-offs (dyn/sig/sat). Use Normalize to sum to 1.", foreground="#444").pack(anchor=tk.W, padx=8, pady=(0,4))
 
         # Thickness model selection
         self.thickness_model_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Model")
@@ -1467,6 +1477,43 @@ class MainWindow(tk.Tk):
             return "Poor"
         else:
             return "Very Poor"
+
+    def show_help(self):
+        """Show a consolidated help dialog explaining controls and parameters."""
+        help_text = (
+            "File Selection:\n"
+            "  - Select Files: choose one or more images to load into the viewer.\n\n"
+            "Background Correction Controls:\n"
+            "  - Preview Methods: open side-by-side previews for each correction method.\n"
+            "  - Recommend Method: compute a recommendation using tunable weights (dyn/sig/sat).\n\n"
+            "Method Parameters (advanced):\n"
+            "  - Gaussian Blur Kernel: odd integer kernel; 0 disables blur. Small kernels remove noise.\n"
+            "  - BaSiC n_components: number of basis components for polynomial/NMF correction; higher may remove background but risk removing signal.\n"
+            "  - Rolling Ball Radius: radius in pixels for the large-kernel background estimator; larger removes broader illumination.\n"
+            "  - RESTORE Percentile: tunes background/foreground bias in RESTORE method; start with small values.\n"
+            "  - Homomorphic cutoff/gains: frequency cutoff and low/high gains for homomorphic filtering; adjust to balance contrast vs noise.\n\n"
+            "Recommendation weights:\n"
+            "  - dyn/sig/sat: weights for dynamic-range preservation, signal preservation (ROI), and saturation reduction. Use Normalize to sum to 1.\n\n"
+            "Scale & Export:\n"
+            "  - Set Scale Manually: draw a circle over a known distance and enter that distance (mm) to compute pixels/mm.\n"
+            "  - Insert Scale Bar: adds a draggable scale bar to the preview (requires spatial scale).\n"
+            "  - Export Image: save the current view (image or heatmap) to disk.\n\n"
+            "Tips:\n"
+            "  - Use Preview Methods before committing to a correction.\n"
+            "  - Tune parameters conservatively and inspect results.\n"
+        )
+
+        try:
+            help_win = tk.Toplevel(self)
+            help_win.title("Help")
+            help_win.geometry("600x500")
+            txt = tk.Text(help_win, wrap=tk.WORD)
+            txt.insert(tk.END, help_text)
+            txt.config(state=tk.DISABLED)
+            txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        except Exception:
+            # Fallback to messagebox if Toplevel fails
+            messagebox.showinfo("Help", help_text)
 
 
 if __name__ == "__main__":
