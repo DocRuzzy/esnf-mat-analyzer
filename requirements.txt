@@ -5,6 +5,7 @@ matplotlib
 pandas
 pyyaml
 piexif
+PyWavelets
 
 # Test dependencies
 pytest

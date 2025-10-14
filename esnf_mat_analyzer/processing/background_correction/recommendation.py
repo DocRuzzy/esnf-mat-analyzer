@@ -165,3 +165,15 @@ def get_standard_methods() -> Dict[str, Callable[[np.ndarray], np.ndarray]]:
             'restore': lambda img: img,
             'homomorphic': lambda img: img,
         }
+
+
+def id_to_friendly(method_id: str) -> str:
+    """Return a GUI-friendly label for a method id."""
+    mapping = {
+        'none': 'Default (None)',
+        'basic': 'Polynomial Surface (Robust)',
+        'rolling_ball': 'Large Kernel Blur',
+        'restore': 'Complete Workflow',
+        'homomorphic': 'Complete Workflow (Alt)'
+    }
+    return mapping.get(method_id, method_id)

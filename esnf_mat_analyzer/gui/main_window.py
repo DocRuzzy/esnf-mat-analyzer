@@ -672,7 +672,12 @@ class MainWindow(tk.Tk):
 
     def show_heatmap(self):
         if not self.last_analysis_result:
-            print("Please run an analysis first.")
+            # Provide a clear popup to the user when no analysis has been run
+            try:
+                messagebox.showerror("No Analysis", "Please run an analysis first.")
+            except Exception:
+                # Fallback to console if messagebox fails for some reason
+                print("Please run an analysis first.")
             return
 
         # Create a visualizer with custom configuration
@@ -993,10 +998,16 @@ class MainWindow(tk.Tk):
                 tk.messagebox.showinfo("Recommendation", "No recommendation could be made.")
                 return
 
-            # Show scores in a simple messagebox
-            text = f"Recommended method: {best}\n\nScores:\n"
+            # Show scores in a simple messagebox using friendly labels
+            try:
+                from esnf_mat_analyzer.processing.background_correction.recommendation import id_to_friendly
+            except Exception:
+                def id_to_friendly(x):
+                    return x
+
+            text = f"Recommended method: {id_to_friendly(best)}\n\nScores:\n"
             for k, v in sorted(scores.items(), key=lambda kv: kv[1], reverse=True):
-                text += f"  {k}: {v:.3f}\n"
+                text += f"  {id_to_friendly(k)}: {v:.3f}\n"
 
             tk.messagebox.showinfo("Background Method Recommendation", text)
 
