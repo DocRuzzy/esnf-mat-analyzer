@@ -42,6 +42,13 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by the A
 - T023 GUI: Fit main window for 1080p and add left-panel + canvas scrollbars (2025-09-29)
 - T025 Unit tests for GUI image/ROI helpers (2025-09-29)
 - T008 Document all uniformity metrics in `docs/guides/uniformity.md` (2025-10-05)
+ 
+- T032 Add circular ROI selection in GUI (2025-11-02)
+ 
+- T033 Add detailed interpretation guide to Mat-Scale Analysis GUI (2025-11-02)
+ - T033 Add detailed interpretation guide to Mat-Scale Analysis GUI — DONE (2025-11-02): inserted expanded per-metric interpretations into `esnf_mat_analyzer/gui/main_window.py`, fixed syntax/indentation issues discovered during edit, and verified no syntax errors remain with a quick static check.
+
+- T034 Restore scrollable left-panel helpers in GUI — DONE (2025-11-02): Recreated the scrollable left-panel container, canvas, scrollbar, and added the missing `on_frame_configure` and `on_canvas_configure` helpers in `esnf_mat_analyzer/gui/main_window.py` so the left-panel scrolling/bounding behavior no longer raises a NameError at startup. Verified edits applied and file parsed without syntax errors.
 
 - T002 Recommendation tuning harness run (2025-10-05)
 	- Ran `scripts/tune_recommendation_on_synthetic.py` over demo dataset; output summary CSV at `benchmark_results/phase1_demo_20250806_152400/recommendation_tuning_summary.csv`. Demo images lacked per-image benchmark labels (entries contain `NONE`) so no tuned weights were produced. Recommend re-running on labeled benchmark for useful tuning.

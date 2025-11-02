@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
 from pathlib import Path
 import math
+
 import numpy as np
 import cv2
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -13,6 +14,7 @@ from esnf_mat_analyzer.visualization.visualization import Visualizer
 from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
 from esnf_mat_analyzer.config.config_manager import get_default_config, save_config, load_config
 import yaml
+
 
 class MainWindow(tk.Tk):
     def __init__(self, user_config_path=None):
@@ -26,33 +28,7 @@ class MainWindow(tk.Tk):
         self.selected_files = []
         self.current_image = None
         self.displayed_image = None
-        self.tk_image = None
-        self.rect = None
-        self.oval = None
-        self.start_x = None
-        self.start_y = None
-        self.drawing_mode = "roi"
-        self.spatial_scale = None
-        self.last_analysis_result = None
         
-        # Image display properties
-        self.scale_factor = 1.0
-        self.min_scale = 0.1
-        self.max_scale = 5.0
-        self.canvas_width = 800
-        self.canvas_height = 600
-        
-        # Pan properties
-        self.pan_start_x = 0
-        self.pan_start_y = 0
-        self.is_panning = False
-
-        self.create_widgets()
-
-    def create_widgets(self):
-        self.main_frame = ttk.Frame(self)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
         # --- Create a scrollable left panel ---
         left_panel_container = ttk.Frame(self.main_frame)
         left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=5)
@@ -343,6 +319,14 @@ class MainWindow(tk.Tk):
         )
         self.insert_scale_bar_button.pack(pady=5)
 
+        # ROI shape selection (rectangle or circle)
+        self.roi_shape_var = tk.StringVar(value="rectangle")
+        roi_shape_frame = ttk.Frame(self.image_controls_frame)
+        roi_shape_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(roi_shape_frame, text="ROI Shape:").pack(side=tk.LEFT, padx=4)
+        ttk.Radiobutton(roi_shape_frame, text="Rectangle", variable=self.roi_shape_var, value="rectangle").pack(side=tk.LEFT, padx=4)
+        ttk.Radiobutton(roi_shape_frame, text="Circle", variable=self.roi_shape_var, value="circle").pack(side=tk.LEFT, padx=4)
+
         self.show_heatmap_button = ttk.Button(
             self.analysis_frame, text="Show Heatmap", command=self.show_heatmap
         )
@@ -392,55 +376,7 @@ class MainWindow(tk.Tk):
             self.selected_files = files
             self.update_file_list()
 
-    def update_file_list(self):
-        self.file_listbox.delete(0, tk.END)
-        for file in self.selected_files:
-            self.file_listbox.insert(tk.END, file)
-
-    def on_file_select(self, event):
-        selection = event.widget.curselection()
-        if selection:
-            index = selection[0]
-            filepath = self.selected_files[index]
-            self.load_image(filepath)
-
-    def load_image(self, filepath):
-        try:
-            image = Image.open(filepath)
-            self.current_image = image
-            self.fit_to_window()
-        except Exception as e:
-            print(f"Error loading image: {e}")
-
-    def fit_to_window(self):
-        if not self.current_image:
-            return
-            
-        # Get canvas dimensions
-        self.canvas.update_idletasks()
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
         
-        if canvas_width <= 1 or canvas_height <= 1:
-            # Canvas not ready yet, try again later
-            self.canvas.after(100, self.fit_to_window)
-            return
-        
-        # Calculate scale to fit image in canvas
-        img_width, img_height = self.current_image.size
-        scale_x = (canvas_width - 20) / img_width  # Leave some margin
-        scale_y = (canvas_height - 20) / img_height
-        
-        self.scale_factor = min(scale_x, scale_y, 1.0)  # Don't scale up initially
-        self.scale_factor = max(self.scale_factor, self.min_scale)
-        
-        self.update_image_display()
-
-    def reset_zoom(self):
-        if not self.current_image:
-            return
-        self.scale_factor = 1.0
-        self.update_image_display()
 
     def zoom_in(self):
         if not self.current_image:
@@ -531,12 +467,22 @@ class MainWindow(tk.Tk):
         self.start_y = canvas_y
         
         if self.drawing_mode == "roi":
-            if self.rect:
-                self.canvas.delete(self.rect)
-            self.rect = self.canvas.create_rectangle(
-                self.start_x, self.start_y, self.start_x, self.start_y,
-                outline="red", width=2, tags="roi"
-            )
+            # Create rectangular or circular ROI depending on selection
+            if self.roi_shape_var.get() == "rectangle":
+                if self.rect:
+                    self.canvas.delete(self.rect)
+                self.rect = self.canvas.create_rectangle(
+                    self.start_x, self.start_y, self.start_x, self.start_y,
+                    outline="red", width=2, tags="roi"
+                )
+            else:
+                # circle ROI uses an oval canvas item
+                if self.oval:
+                    self.canvas.delete(self.oval)
+                self.oval = self.canvas.create_oval(
+                    self.start_x, self.start_y, self.start_x, self.start_y,
+                    outline="red", width=2, tags="roi"
+                )
         elif self.drawing_mode == "scale":
             if self.oval:
                 self.canvas.delete(self.oval)
@@ -554,9 +500,15 @@ class MainWindow(tk.Tk):
         canvas_y = self.canvas.canvasy(event.y)
         
         if self.drawing_mode == "roi":
-            self.canvas.coords(self.rect, self.start_x, self.start_y, canvas_x, canvas_y)
+            if self.roi_shape_var.get() == "rectangle":
+                if self.rect:
+                    self.canvas.coords(self.rect, self.start_x, self.start_y, canvas_x, canvas_y)
+            else:
+                if self.oval:
+                    self.canvas.coords(self.oval, self.start_x, self.start_y, canvas_x, canvas_y)
         elif self.drawing_mode == "scale":
-            self.canvas.coords(self.oval, self.start_x, self.start_y, canvas_x, canvas_y)
+            if self.oval:
+                self.canvas.coords(self.oval, self.start_x, self.start_y, canvas_x, canvas_y)
 
     def on_button_release(self, event):
         if self.is_panning:
@@ -565,7 +517,8 @@ class MainWindow(tk.Tk):
         if self.drawing_mode == "scale":
             self.calculate_scale_from_oval()
 
-        self.drawing_mode = "roi" # Reset drawing mode
+        # After finishing any draw action, return to ROI-drawing mode
+        self.drawing_mode = "roi"
 
     def insert_scale_bar(self):
         if not self.spatial_scale:
@@ -839,16 +792,29 @@ class MainWindow(tk.Tk):
             tk.messagebox.showwarning("Warning", "Please select an image first.")
             return
 
-        # Convert PIL image to numpy array (RGB)
-        image_np = np.array(self.current_image)
-        if image_np.ndim == 2:
-            # Already grayscale
-            gray_image = image_np
-        elif image_np.ndim == 3 and image_np.shape[2] == 3:
-            # RGB to grayscale
-            gray_image = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-        else:
-            tk.messagebox.showerror("Error", "Unsupported image format for preview.")
+        # Robustly convert current image (PIL or numpy) to grayscale.
+        try:
+            if isinstance(self.current_image, np.ndarray):
+                img_np = self.current_image
+                # If already grayscale
+                if img_np.ndim == 2:
+                    gray_image = img_np
+                else:
+                    # Drop alpha channel if present
+                    if img_np.shape[2] == 4:
+                        img_np = img_np[..., :3]
+                    # Try converting assuming RGB; fall back to BGR if needed
+                    try:
+                        gray_image = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+                    except Exception:
+                        gray_image = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+            else:
+                # Convert PIL images to RGB first to handle RGBA, P, CMYK, etc.
+                pil_rgb = self.current_image.convert('RGB')
+                img_np = np.array(pil_rgb)
+                gray_image = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Unsupported image format for preview: {e}")
             return
 
         # Defensive: check for empty image
@@ -1102,18 +1068,22 @@ class MainWindow(tk.Tk):
 
     def get_roi_coordinates(self):
         """Get ROI coordinates from canvas rectangle."""
-        if not self.rect:
-            return None
-            
-        # Get ROI from canvas (in scaled coordinates)
-        x1, y1, x2, y2 = self.canvas.coords(self.rect)
-        
+        # Support rectangle and circle ROI shapes. Return bounding box (orig coords)
+        if self.roi_shape_var.get() == "rectangle":
+            if not self.rect:
+                return None
+            x1, y1, x2, y2 = self.canvas.coords(self.rect)
+        else:
+            if not self.oval:
+                return None
+            x1, y1, x2, y2 = self.canvas.coords(self.oval)
+
         # Convert scaled coordinates back to original image coordinates
         orig_x1 = int(x1 / self.scale_factor)
         orig_y1 = int(y1 / self.scale_factor)
         orig_x2 = int(x2 / self.scale_factor)
         orig_y2 = int(y2 / self.scale_factor)
-        
+
         # Ensure coordinates are within image bounds
         if self.current_image:
             img_width, img_height = self.current_image.size
@@ -1121,7 +1091,7 @@ class MainWindow(tk.Tk):
             orig_y1 = max(0, min(orig_y1, img_height))
             orig_x2 = max(0, min(orig_x2, img_width))
             orig_y2 = max(0, min(orig_y2, img_height))
-        
+
         return (orig_x1, orig_y1, orig_x2, orig_y2)
 
     def analyze(self):
@@ -1447,21 +1417,54 @@ class MainWindow(tk.Tk):
         psd_value = result.metrics.get('psd_uniformity', float('nan'))
         if isinstance(psd_value, float) and not math.isnan(psd_value):
             mat_result += f"  PSD Uniformity: {psd_value:.4f} (0-1, higher is better)\n"
-        
 
-        
         mat_result += "\n"
-        
-        # Add interpretation guide
+
+        # Add detailed interpretation guide (metric definitions, ranges, heuristics)
         mat_result += "=" * 40 + "\n"
-        mat_result += "Interpretation Guide:\n"
-        mat_result += "- Anisotropy Index (0-1): Lower values indicate more isotropic (uniform) structure\n"
-        mat_result += "- Homogeneity (0-1): Higher values indicate more uniform texture\n"
-        mat_result += "- Energy (0-1): Higher values indicate more ordered structure\n"
-        mat_result += "- Correlation (-1 to 1): Measures linear dependencies in texture\n"
-        mat_result += "- Contrast (0+): Lower values indicate smoother texture\n"
-        mat_result += "- PSD Uniformity (0-1): Higher values indicate more uniform frequency distribution\n"
-        
+        mat_result += "Interpretation Guide (per-metric):\n\n"
+
+        # Anisotropy group
+        mat_result += "Anisotropy (FFT-based)\n"
+        mat_result += "- anisotropy_index (0 - 1): 0 = perfectly isotropic; higher values indicate stronger directional alignment.\n"
+        mat_result += "  Suggested heuristics: <= 0.15 (low anisotropy/isotropic), 0.15-0.30 (moderate), > 0.30 (strong alignment).\n"
+        mat_result += "- anisotropy_preferred_angle_degrees (0 - 180): principal orientation of aligned features in degrees.\n\n"
+
+        # Texture group
+        mat_result += "Texture (GLCM and related)\n"
+        mat_result += "- texture_homogeneity (0 - 1): higher is more uniform / less local variation. Typical desirable: > 0.7.\n"
+        mat_result += "- texture_energy (0 - 1): measures order; higher values indicate repeated/regular structure.\n"
+        mat_result += "- texture_contrast (0+): measures local intensity differences; lower values indicate smoother texture.\n"
+        mat_result += "  Note: scales and image bit-depth affect absolute contrast values — compare within a dataset.\n"
+        mat_result += "- texture_correlation (-1 to 1): measures linear dependency between neighboring pixels; values near 0 indicate no strong linear relation.\n\n"
+
+        # PSD group
+        mat_result += "Frequency / PSD (Power Spectral Density)\n"
+        mat_result += "- psd_uniformity (0 - 1): higher values indicate a more even spread of power across spatial frequencies (perceived as uniform).\n"
+        mat_result += "  Suggested heuristics: >= 0.6 often indicates good frequency-uniform mats; < 0.4 may show strong periodic structure or defects.\n"
+        mat_result += "- psd_dominant_frequency: frequency (units = cycles/mm if spatial_scale provided, otherwise cycles/pixel) of the strongest spectral peak.\n"
+        mat_result += "- psd_periodicity_index: higher values indicate stronger periodic/regular patterns. Use together with dominant_frequency to detect repeating structures.\n\n"
+
+        # Multiscale uniformity
+        mat_result += "Multi-scale Uniformity\n"
+        mat_result += "- scale_*_uniformity (0 - 1): per-scale uniformity measures from local (fiber-level) to global (whole-mat).\n"
+        mat_result += "  Interpretation: values closer to 1 indicate more uniformity at that spatial scale. Use the per-scale profile to identify at which length-scale non-uniformity appears.\n\n"
+
+        # Overall and traditional metrics
+        mat_result += "Overall / Traditional Metrics\n"
+        mat_result += "- overall_mat_uniformity (0 - 1): composite score combining multiple features. Higher is better. Thresholds: >=0.8 Excellent; 0.6-0.8 Good; 0.4-0.6 Fair; <0.4 Poor.\n"
+        mat_result += "- GiniCoefficient (0 - 1): measures inequality of thickness distribution. Higher values = more unequal (worse uniformity).\n"
+        mat_result += "- RadialUniformityIndex (0 - 1): radial uniformity; higher means more radially even thickness.\n"
+        mat_result += "- Thickness range / CV: report of dispersion in thickness (mm or pixels). Lower coefficient of variation (CV) indicates more uniform thickness.\n\n"
+
+        # Practical notes
+        mat_result += "Practical Notes and Recommendations:\n"
+        mat_result += "- Units: PSD-related frequencies require a spatial scale (pixels/mm) to convert to cycles/mm; set scale for absolute frequency units.\n"
+        mat_result += "- Comparison: many metric thresholds are dataset-dependent — derive thresholds from a labeled representative dataset when possible.\n"
+        mat_result += "- ROI shape: the GUI currently passes the ROI bounding box to analyzers. For circular ROI accuracy, consider enabling a true circular mask (future improvement).\n"
+        mat_result += "- Use multi-metric decision: combine anisotropy, PSD, and multiscale uniformity to detect alignment, periodic defects, and local heterogeneity.\n"
+        mat_result += "- Visual validation: always inspect heatmaps and corrected images alongside numeric scores; metrics are complements, not replacements, for visual QC.\n\n"
+
         mat_text.insert(tk.END, mat_result)
         mat_text.config(state=tk.DISABLED)
 
