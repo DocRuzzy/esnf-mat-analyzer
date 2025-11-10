@@ -28,6 +28,9 @@ class MainWindow(tk.Tk):
         self.selected_files = []
         self.current_image = None
         self.displayed_image = None
+        # Main container frame for left controls and right image preview
+        self.main_frame = ttk.Frame(self)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
         
         # --- Create a scrollable left panel ---
         left_panel_container = ttk.Frame(self.main_frame)
@@ -376,6 +379,73 @@ class MainWindow(tk.Tk):
             self.selected_files = files
             self.update_file_list()
 
+    def update_file_list(self):
+        """Populate the file listbox from `self.selected_files`."""
+        try:
+            self.file_listbox.delete(0, tk.END)
+            for p in self.selected_files:
+                try:
+                    self.file_listbox.insert(tk.END, Path(p).name)
+                except Exception:
+                    self.file_listbox.insert(tk.END, str(p))
+        except Exception:
+            # If listbox isn't ready yet, ignore
+            pass
+
+    def on_file_select(self, event):
+        """Handle when user selects a file from the listbox.
+
+        This loads the selected image into `self.current_image` (PIL.Image)
+        and resets zoom/ROI state so the user can interact with it.
+        """
+        try:
+            sel = self.file_listbox.curselection()
+            if not sel:
+                return
+            index = sel[0]
+            filepath = self.selected_files[index]
+
+            # Load image using PIL
+            try:
+                pil_img = Image.open(filepath)
+                # Keep as RGB for consistent handling (convert if code expects L later)
+                pil_img = pil_img.convert('RGB')
+            except Exception:
+                # Fallback: try converting via OpenCV then to PIL
+                try:
+                    arr = cv2.imread(str(filepath), cv2.IMREAD_UNCHANGED)
+                    if arr is None:
+                        raise IOError("Failed to read image")
+                    arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+                    pil_img = Image.fromarray(arr)
+                except Exception:
+                    messagebox.showerror("Open Image", f"Failed to open image: {filepath}")
+                    return
+
+            self.current_image = pil_img
+
+            # Initialize zoom and view state
+            self.scale_factor = 1.0
+            self.min_scale = 0.1
+            self.max_scale = 10.0
+            self.is_panning = False
+            self.drawing_mode = 'roi'
+            self.rect = None
+            self.oval = None
+
+            # Reset spatial scale if not set
+            if not hasattr(self, 'spatial_scale'):
+                self.spatial_scale = None
+
+            # Update the display
+            try:
+                self.update_image_display()
+            except Exception:
+                pass
+
+        except Exception as e:
+            print(f"on_file_select failed: {e}")
+
         
 
     def zoom_in(self):
@@ -403,6 +473,41 @@ class MainWindow(tk.Tk):
     def on_canvas_configure(self, event):
         # Update scroll region when canvas is resized
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def fit_to_window(self):
+        """Scale the image so it fits within the canvas viewport."""
+        if not self.current_image:
+            return
+        try:
+            c_w = self.canvas.winfo_width() or 1
+            c_h = self.canvas.winfo_height() or 1
+            img_w, img_h = self.current_image.size
+            # Compute scale to fit both dimensions
+            scale_x = c_w / img_w
+            scale_y = c_h / img_h
+            new_scale = min(scale_x, scale_y, 1.0)
+            # Clamp to min/max if present
+            if not hasattr(self, 'min_scale'):
+                self.min_scale = 0.1
+            if not hasattr(self, 'max_scale'):
+                self.max_scale = 10.0
+            new_scale = max(self.min_scale, min(new_scale, self.max_scale))
+            self.scale_factor = new_scale
+            self.update_image_display()
+        except Exception:
+            pass
+
+    def reset_zoom(self):
+        """Reset zoom to 100% (scale factor 1.0)."""
+        try:
+            self.scale_factor = 1.0
+            if not hasattr(self, 'min_scale'):
+                self.min_scale = 0.1
+            if not hasattr(self, 'max_scale'):
+                self.max_scale = 10.0
+            self.update_image_display()
+        except Exception:
+            pass
 
     def update_image_display(self):
         if not self.current_image:
