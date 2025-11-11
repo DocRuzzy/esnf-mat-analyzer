@@ -313,6 +313,66 @@ class NanoFiberAnalyzer(AnalyzerInterface):
         except Exception as e:
             self.logger.error(f"Error calculating mat-scale uniformity metrics: {e}", exc_info=True)
 
+        # Compute an overall composite uniformity score from available mat-scale metrics
+        try:
+            comp_scores = []
+
+            # 1) Prefer multi-scale global measure (scale_0 or scale_4 depending on availability)
+            scale_keys = [k for k in metrics.keys() if k.startswith('scale_') and k.endswith('_uniformity')]
+            scale_vals = [float(metrics[k]) for k in scale_keys if np.isfinite(metrics[k])]
+            scale_global = None
+            if 'scale_4_uniformity' in metrics and np.isfinite(metrics.get('scale_4_uniformity', np.nan)):
+                scale_global = float(metrics['scale_4_uniformity'])
+            elif 'scale_0_uniformity' in metrics and np.isfinite(metrics.get('scale_0_uniformity', np.nan)):
+                scale_global = float(metrics['scale_0_uniformity'])
+            elif scale_vals:
+                # fallback to mean of available scales
+                scale_global = float(np.mean(scale_vals))
+
+            if scale_global is not None:
+                comp_scores.append(('scale', scale_global, 0.35))
+
+            # 2) Texture homogeneity if available
+            tex = metrics.get('texture_homogeneity', None)
+            if tex is not None and np.isfinite(tex):
+                comp_scores.append(('texture', float(tex), 0.25))
+
+            # 3) PSD uniformity if available
+            psd = metrics.get('psd_uniformity', None)
+            if psd is not None and np.isfinite(psd):
+                comp_scores.append(('psd', float(psd), 0.2))
+
+            # 4) Anisotropy: lower anisotropy is better, invert it to a 0-1 score
+            anis = metrics.get('anisotropy_index', None)
+            if anis is not None and np.isfinite(anis):
+                try:
+                    anis_score = max(0.0, 1.0 - float(anis))
+                except Exception:
+                    anis_score = None
+                if anis_score is not None:
+                    comp_scores.append(('anisotropy', anis_score, 0.2))
+
+            # Normalize weights and compute weighted average
+            if comp_scores:
+                total_w = sum(w for _, _, w in comp_scores)
+                if total_w <= 0:
+                    overall = float('nan')
+                else:
+                    overall = 0.0
+                    for name, val, w in comp_scores:
+                        overall += (val * (w / total_w))
+                    # Clip to [0,1]
+                    overall = float(np.clip(overall, 0.0, 1.0))
+                metrics['overall_mat_uniformity'] = overall
+                self.logger.info(f"Computed overall_mat_uniformity={overall:.4f} from components: {[(n,round(v,3),w) for n,v,w in comp_scores]}")
+            else:
+                # No components available; set NaN to indicate missing composite
+                metrics['overall_mat_uniformity'] = float('nan')
+                self.logger.warning("No components available to compute overall_mat_uniformity; set to NaN")
+        except Exception as e:
+            self.logger.error(f"Failed to compute overall_mat_uniformity: {e}", exc_info=True)
+            metrics['overall_mat_uniformity'] = float('nan')
+
         processing_duration = time.time() - processing_start_time
         self.logger.info(f"Image processing completed in {processing_duration:.2f} seconds.")
 

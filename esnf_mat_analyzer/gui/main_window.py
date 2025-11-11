@@ -779,45 +779,81 @@ class MainWindow(tk.Tk):
         if not filepath:
             return
 
-        # Create an image from the canvas
-        self.canvas.postscript(file="canvas.ps", colormode="color")
-        img = Image.open("canvas.ps")
-
-        # If a heatmap exists, blend it with the image
-        if self.last_analysis_result:
-            vis_config = VisualizationConfig()
-            vis_config.auto_range_heatmap = self.auto_range_var.get()
-            visualizer = Visualizer(vis_config)
-            fig = visualizer.create_thickness_heatmap(
-                self.last_analysis_result.thickness_map,
-                self.last_analysis_result.mask,
-                self.last_analysis_result.saturation_mask
-            )
-            fig.canvas.draw()
-            
-            # Convert matplotlib figure to image
-            fig_img = Image.frombytes(
-                "RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb()
-            )
-            # Here you could blend img and fig_img if needed
-            img = fig_img
-            
+        # Robust export handling for different image types (PIL.Image, numpy arrays, matplotlib figures)
         try:
-            # Convert to RGB mode to ensure compatibility
-            if img.mode != 'RGB':
+            # If an analysis heatmap exists and user wants the heatmap overlay, prefer producing it via Visualizer
+            if self.last_analysis_result:
+                try:
+                    vis_config = VisualizationConfig()
+                    vis_config.auto_range_heatmap = self.auto_range_var.get()
+                    visualizer = Visualizer(vis_config)
+                    fig = visualizer.create_thickness_heatmap(
+                        self.last_analysis_result.thickness_map,
+                        self.last_analysis_result.mask,
+                        self.last_analysis_result.saturation_mask
+                    )
+                    fig.canvas.draw()
+                    # Convert matplotlib figure to PIL Image
+                    img = Image.frombytes("RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
+                except Exception:
+                    # Fall back to exporting the current canvas image
+                    try:
+                        self.canvas.postscript(file="canvas.ps", colormode="color")
+                        img = Image.open("canvas.ps")
+                    except Exception:
+                        img = None
+            else:
+                # Export the current displayed image (PIL or numpy)
+                img = None
+                try:
+                    # If current_image is a PIL Image
+                    if isinstance(self.current_image, Image.Image):
+                        img = self.current_image
+                    elif isinstance(self.current_image, np.ndarray):
+                        # Convert numpy (assumed RGB) to PIL
+                        arr = self.current_image
+                        if arr.ndim == 3 and arr.shape[2] == 3:
+                            img = Image.fromarray(arr)
+                        else:
+                            # Single channel or other
+                            img = Image.fromarray(arr)
+                    else:
+                        # Last resort: try converting to numpy array then to PIL
+                        arr = np.array(self.current_image)
+                        img = Image.fromarray(arr)
+                except Exception:
+                    try:
+                        self.canvas.postscript(file="canvas.ps", colormode="color")
+                        img = Image.open("canvas.ps")
+                    except Exception:
+                        img = None
+
+            if img is None:
+                raise RuntimeError("No image could be prepared for export.")
+
+            # Ensure RGB and save via PIL for best compatibility
+            if getattr(img, 'mode', None) != 'RGB':
                 img = img.convert('RGB')
-            # Save without EXIF data
+
             img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
             print(f"Image saved to {filepath}")
         except Exception as e:
-            print(f"Export failed: {e}")
-            # Try alternative save method
+            # Final fallback: try writing with OpenCV after converting to numpy properly
             try:
-                img_array = np.array(img)
-                cv2.imwrite(filepath, cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR))
-                print(f"Image saved to {filepath} using alternative method")
+                if isinstance(img, Image.Image):
+                    arr = np.array(img)
+                else:
+                    arr = np.array(self.current_image)
+
+                # Convert RGB->BGR if needed
+                if arr.ndim == 3 and arr.shape[2] == 3:
+                    cv2.imwrite(filepath, cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+                else:
+                    cv2.imwrite(filepath, arr)
+
+                print(f"Image saved to {filepath} using OpenCV fallback")
             except Exception as e2:
-                print(f"Alternative export failed: {e2}")
+                print(f"Export failed: {e} | fallback failed: {e2}")
                 messagebox.showerror("Export Error", f"Failed to save image: {e2}")
 
     def on_bg_method_change(self):
@@ -1325,7 +1361,13 @@ class MainWindow(tk.Tk):
             traceback.print_exc()
 
     def export_image(self):
-        """Export the current image with optional heatmap overlay."""
+        """Export the current image with optional heatmap overlay.
+
+        This is a robust exporter that accepts PIL Images, numpy arrays, or
+        generates an overlayed matplotlib heatmap if available. It prefers
+        PIL's save (most formats), and falls back to OpenCV after converting
+        to a proper numpy array.
+        """
         if not self.current_image:
             print("No image to export.")
             return
@@ -1337,21 +1379,110 @@ class MainWindow(tk.Tk):
         if not filepath:
             return
 
-        # Create an image from the current display
         try:
-            # Convert the image to RGB
-            pil_image = Image.fromarray(cv2.cvtColor(self.current_image, cv2.COLOR_BGR2RGB))
-            # Save without EXIF data
-            pil_image.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
+            # If a heatmap exists, prefer exporting it (clean overlay)
+            if self.last_analysis_result:
+                try:
+                    vis_config = VisualizationConfig()
+                    vis_config.auto_range_heatmap = self.auto_range_var.get()
+                    visualizer = Visualizer(vis_config)
+                    fig = visualizer.create_thickness_heatmap(
+                        self.last_analysis_result.thickness_map,
+                        self.last_analysis_result.mask,
+                        self.last_analysis_result.saturation_mask
+                    )
+                    fig.canvas.draw()
+                    # Render the figure to an RGBA array and convert to PIL Image
+                    w, h = fig.canvas.get_width_height()
+                    try:
+                        buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+                        buf.shape = (h, w, 4)
+                        # ARGB -> RGBA
+                        buf = buf[:, :, [1, 2, 3, 0]]
+                        heatmap_pil = Image.fromarray(buf, mode='RGBA')
+                    except Exception:
+                        # Fallback to RGB if ARGB not available
+                        img_rgb = Image.frombytes("RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
+                        heatmap_pil = img_rgb.convert('RGBA')
+                    # We'll blend heatmap_pil over the base image later; set img placeholder to heatmap_pil
+                    img = heatmap_pil
+                except Exception:
+                    img = None
+            else:
+                img = None
+
+            # If no heatmap image was created, try to prepare current_image
+            if img is None:
+                if isinstance(self.current_image, Image.Image):
+                    img = self.current_image
+                elif isinstance(self.current_image, np.ndarray):
+                    arr = self.current_image
+                    # If it's BGR (OpenCV), convert to RGB for PIL
+                    if arr.ndim == 3 and arr.shape[2] == 3:
+                        img = Image.fromarray(arr)
+                    else:
+                        img = Image.fromarray(arr)
+                else:
+                    # Last resort: try to rasterize the canvas
+                    try:
+                        self.canvas.postscript(file="canvas.ps", colormode="color")
+                        img = Image.open("canvas.ps")
+                    except Exception:
+                        raise RuntimeError("Unable to obtain an image for export.")
+
+            # If we have a heatmap PIL image and a base image, composite them
+            if isinstance(img, Image.Image) and self.current_image is not None and self.last_analysis_result:
+                try:
+                    base_pil = self.current_image.convert('RGB')
+                    # Resize heatmap to match base image size
+                    heatmap_resized = img.resize(base_pil.size, resample=Image.BILINEAR).convert('RGBA')
+                    # Apply a semi-transparent alpha to make underlying image visible
+                    alpha = 0.6
+                    a = int(255 * alpha)
+                    heatmap_resized.putalpha(a)
+                    base_rgba = base_pil.convert('RGBA')
+                    composite = Image.alpha_composite(base_rgba, heatmap_resized)
+                    out_img = composite.convert('RGB')
+                    out_img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
+                    print(f"Image saved to {filepath} (heatmap overlaid)")
+                    return
+                except Exception:
+                    # If compositing fails, fall back to saving heatmap alone
+                    try:
+                        img_rgb = img.convert('RGB')
+                        img_rgb.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
+                        print(f"Image saved to {filepath} (heatmap only)")
+                        return
+                    except Exception:
+                        pass
+
+            # Ensure RGB mode and save using PIL for non-heatmap images
+            if getattr(img, 'mode', None) != 'RGB':
+                img = img.convert('RGB')
+
+            img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
             print(f"Image saved to {filepath}")
+            return
         except Exception as e:
-            print(f"Export failed: {e}")
-            # Try alternative save method using OpenCV
+            # Fallback: convert to numpy and use OpenCV imwrite
             try:
-                cv2.imwrite(filepath, self.current_image)
-                print(f"Image saved to {filepath} using alternative method")
+                if isinstance(img, Image.Image):
+                    arr = np.array(img)
+                elif isinstance(self.current_image, np.ndarray):
+                    arr = self.current_image
+                else:
+                    arr = np.array(self.current_image)
+
+                if arr.ndim == 3 and arr.shape[2] == 3:
+                    # If array is RGB, convert to BGR for OpenCV
+                    cv2.imwrite(filepath, cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+                else:
+                    cv2.imwrite(filepath, arr)
+
+                print(f"Image saved to {filepath} using OpenCV fallback")
+                return
             except Exception as e2:
-                print(f"Alternative export failed: {e2}")
+                print(f"Export failed: {e} | fallback failed: {e2}")
                 messagebox.showerror("Export Error", f"Failed to save image: {e2}")
 
     def display_results(self, result):
