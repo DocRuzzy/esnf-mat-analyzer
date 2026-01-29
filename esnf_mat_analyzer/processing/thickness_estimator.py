@@ -52,6 +52,10 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
         # Apply the chosen thickness model
         # Ensure calculations are done in float to maintain precision
         image_float = image.astype(np.float32)
+        
+        # Log input image statistics for debugging
+        valid_input = image[mask > 0] if mask is not None and np.any(mask) else image.flatten()
+        self.logger.info(f"Input image to thickness estimator - Min: {np.min(valid_input):.1f}, Max: {np.max(valid_input):.1f}, Mean: {np.mean(valid_input):.1f}, Std: {np.std(valid_input):.1f}")
 
         if self.config.model_type == ThicknessModelType.BEER_LAMBERT:
             # Use Beer-Lambert law for physics-based thickness estimation
@@ -59,7 +63,9 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
             thickness_map = self.beer_lambert.estimate_thickness(
                 image,
                 background_corrected=True,
-                spatial_scale_um_per_pixel=self.config.spatial_scale_um_per_pixel
+                spatial_scale_um_per_pixel=self.config.spatial_scale_um_per_pixel,
+                mask=mask,
+                invert_intensity=True  # Bright = thick, dark = thin
             )
         elif self.config.model_type == ThicknessModelType.LINEAR:
             # thickness = a * brightness + b
@@ -100,6 +106,28 @@ class ThicknessEstimator(ThicknessEstimatorInterface):
 
         # Ensure non-negative thickness
         thickness_map[thickness_map < 0] = 0.0
+        
+        # Apply minimal smoothing to preserve natural intensity variations
+        # while reducing only the most extreme noise
+        if mask is not None and np.any(mask):
+            # Use very subtle Gaussian smoothing to preserve detail
+            # Small kernel and sigma to maintain variations
+            smoothed_thickness = cv2.GaussianBlur(thickness_map.astype(np.float32), (3, 3), sigmaX=0.7, sigmaY=0.7)
+            
+            # Blend: only 20% smoothed, 80% original to preserve variations
+            thickness_map = 0.2 * smoothed_thickness + 0.8 * thickness_map
+            
+            self.logger.info("Applied minimal smoothing to preserve thickness variations")
+
+        # Log thickness statistics for debugging
+        valid_thickness = thickness_map[mask > 0]
+        if len(valid_thickness) > 0:
+            self.logger.info(f"Thickness map statistics:")
+            self.logger.info(f"  Min: {np.min(valid_thickness):.3f}")
+            self.logger.info(f"  Max: {np.max(valid_thickness):.3f}")
+            self.logger.info(f"  Mean: {np.mean(valid_thickness):.3f}")
+            self.logger.info(f"  Std: {np.std(valid_thickness):.3f}")
+            self.logger.info(f"  Range: {np.max(valid_thickness) - np.min(valid_thickness):.3f}")
 
         self.logger.debug("Thickness estimation complete.")
         return thickness_map.astype(np.float32) # Ensure float output

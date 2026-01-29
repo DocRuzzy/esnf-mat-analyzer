@@ -28,7 +28,7 @@ class BeerLambertEstimator:
     def __init__(self, 
                  attenuation_coefficient: float = 0.04778,
                  reference_intensity: Optional[float] = None,
-                 min_transmittance: float = 0.01,
+                 min_transmittance: float = 0.001,
                  max_thickness_um: float = 1000.0):
         """
         Initialize Beer-Lambert estimator.
@@ -48,7 +48,9 @@ class BeerLambertEstimator:
     def estimate_thickness(self, 
                           image: np.ndarray,
                           background_corrected: bool = True,
-                          spatial_scale_um_per_pixel: Optional[float] = None) -> np.ndarray:
+                          spatial_scale_um_per_pixel: Optional[float] = None,
+                          mask: Optional[np.ndarray] = None,
+                          invert_intensity: bool = True) -> np.ndarray:
         """
         Estimate thickness using Beer-Lambert law.
         
@@ -56,6 +58,9 @@ class BeerLambertEstimator:
             image: Input grayscale image (0-255)
             background_corrected: Whether image is already background corrected
             spatial_scale_um_per_pixel: Spatial scale for absolute thickness
+            mask: Optional ROI mask to focus on sample region
+            invert_intensity: If True, higher intensity = thicker (for scattering/reflectance images)
+                            If False, higher intensity = thinner (standard transmission)
             
         Returns:
             Thickness map in micrometers (if scale provided) or relative units
@@ -63,11 +68,51 @@ class BeerLambertEstimator:
         # Convert to float and normalize to [0,1]
         image_float = image.astype(np.float64) / 255.0
         
+        # Log original intensity statistics
+        if mask is not None:
+            valid_orig = image_float[mask > 0]
+            logger.info(f"Original intensity - Min: {np.min(valid_orig):.4f}, Max: {np.max(valid_orig):.4f}, Mean: {np.mean(valid_orig):.4f}, Std: {np.std(valid_orig):.4f}")
+        
+        # Invert intensity if needed (for reflectance/scattering-based images)
+        # where bright regions = thick material
+        if invert_intensity:
+            logger.info("Inverting intensity: bright = thick, dark = thin")
+            image_float = 1.0 - image_float
+            
+            # Log inverted intensity statistics
+            if mask is not None:
+                valid_inv = image_float[mask > 0]
+                logger.info(f"After inversion - Min: {np.min(valid_inv):.4f}, Max: {np.max(valid_inv):.4f}, Mean: {np.mean(valid_inv):.4f}, Std: {np.std(valid_inv):.4f}")
+        
         # Auto-detect background intensity if not provided
         if self.I0 is None:
             if background_corrected:
-                # For background-corrected images, use high percentile as reference
-                self.I0 = np.percentile(image_float, 95)
+                # For inverted images: after inversion, MINIMUM = thinnest (highest original intensity)
+                # We want I0 to represent the reference "no fiber" intensity
+                if mask is not None:
+                    # Focus on the actual sample region
+                    valid_pixels = image_float[mask > 0]
+                    if len(valid_pixels) > 0:
+                        # After inversion: low values = thin, high values = thick
+                        # Use low percentile as reference (thinnest regions)
+                        min_intensity = np.min(valid_pixels)
+                        p1 = np.percentile(valid_pixels, 1)
+                        p5 = np.percentile(valid_pixels, 5)
+                        
+                        # Use a low percentile to represent thinnest regions
+                        self.I0 = np.percentile(valid_pixels, 2)
+                        
+                        logger.info(f"Intensity distribution: Min={min_intensity:.4f}, P1={p1:.4f}, P5={p5:.4f}")
+                        logger.info(f"Reference I0 (2nd percentile): {self.I0:.4f}")
+                    else:
+                        self.I0 = np.percentile(image_float, 5)
+                else:
+                    # No mask - use global low percentile
+                    self.I0 = np.percentile(image_float, 5)
+                    
+                # Ensure I0 is reasonable
+                self.I0 = np.clip(self.I0, 0.001, 0.9)
+                logger.info(f"Final I0: {self.I0:.4f}")
             else:
                 # For raw images, use background regions
                 self.I0 = self._estimate_background_intensity(image_float)
@@ -75,10 +120,18 @@ class BeerLambertEstimator:
         # Calculate transmittance T = I/I₀
         transmittance = image_float / self.I0
         
+        # Log transmittance statistics before clamping
+        if mask is not None:
+            valid_trans = transmittance[mask > 0]
+            if len(valid_trans) > 0:
+                logger.info(f"Transmittance before clamp - Min: {np.min(valid_trans):.4f}, Max: {np.max(valid_trans):.4f}, Mean: {np.mean(valid_trans):.4f}")
+        
         # Clamp transmittance to prevent numerical issues
+        # Lower bound prevents log(0), upper bound prevents negative thickness
         transmittance = np.clip(transmittance, self.min_transmittance, 1.0)
         
         # Apply Beer-Lambert law: t = -ln(T) / α
+        # Lower transmittance (darker) = higher thickness
         optical_thickness = -np.log(transmittance) / self.alpha
         
         # Convert to physical thickness if spatial scale provided

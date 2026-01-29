@@ -40,23 +40,22 @@ class ShapeDetector:
         else:
             gray = image
 
-        # Apply threshold to create binary image
-        # Use Otsu's method for automatic thresholding
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Use Otsu's method as primary thresholding approach
+        _, binary_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        # Find contours
+        # Find contours using Otsu threshold
         contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            binary_otsu, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
         if not contours:
-            self.logger.warning("No contours found")
+            self.logger.warning("No contours found with Otsu method")
             return None
 
         # Find the largest contour (presumably the nanofiber mat)
         largest_contour = max(contours, key=cv2.contourArea)
-
-        self.logger.info(f"Detected contour with {len(largest_contour)} points.")
+        
+        self.logger.info(f"Detected contour with {len(largest_contour)} points using Otsu threshold.")
         return largest_contour
 
     def create_mask(self, image_shape: Tuple[int, int], contour: np.ndarray) -> np.ndarray:

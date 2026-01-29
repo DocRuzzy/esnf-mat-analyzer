@@ -38,7 +38,7 @@ class Visualizer(VisualizerInterface):
     def create_thickness_heatmap(self, thickness_map: np.ndarray, mask: np.ndarray, 
                                 saturation_mask: Optional[np.ndarray] = None) -> Figure:
         """
-        Create a heatmap visualization of the thickness map.
+        Create a heatmap visualization of the thickness map using FFT enhancement.
         
         Args:
             thickness_map: 2D thickness map
@@ -48,10 +48,19 @@ class Visualizer(VisualizerInterface):
         Returns:
             Matplotlib Figure object
         """
-        self.logger.debug("Creating thickness heatmap")
+        self.logger.debug("Creating thickness heatmap with FFT enhancement")
+        
+        # Apply FFT-based enhancement to reveal thickness variations
+        enhanced_map = self._enhance_with_fft(thickness_map, mask)
+
+        # Mild display smoothing to improve perceived gradient without flattening data
+        try:
+            smoothed_map = cv2.GaussianBlur(enhanced_map.astype(np.float32), (7, 7), sigmaX=1.2, sigmaY=1.2)
+        except Exception:
+            smoothed_map = enhanced_map
         
         # Create masked thickness map (only show values within the mask)
-        masked_thickness = np.ma.masked_array(thickness_map, mask=~(mask.astype(bool)))
+        masked_thickness = np.ma.masked_array(smoothed_map, mask=~(mask.astype(bool)))
         
         # Create figure
         fig, ax = plt.subplots(figsize=self.config.figure_size)
@@ -65,15 +74,22 @@ class Visualizer(VisualizerInterface):
             valid_data = masked_thickness.compressed()  # Get non-masked values
             if len(valid_data) > 0:
                 # Use configurable percentiles to avoid extreme outliers affecting the color scale
-                min_percentile, max_percentile = self.config.heatmap_percentile_range
+                # Widen the percentile window slightly for smoother color gradients
+                min_percentile, max_percentile = (max(0, self.config.heatmap_percentile_range[0]-1),
+                                                  min(100, self.config.heatmap_percentile_range[1]+1))
                 vmin = np.percentile(valid_data, min_percentile)
                 vmax = np.percentile(valid_data, max_percentile)
+                
+                # Log data statistics
+                self.logger.info(f"FFT-enhanced thickness data - Min: {np.min(valid_data):.3f}, Max: {np.max(valid_data):.3f}, Mean: {np.mean(valid_data):.3f}")
+                self.logger.info(f"Color range (percentiles {min_percentile}-{max_percentile}): [{vmin:.3f}, {vmax:.3f}]")
             else:
                 vmin, vmax = None, None
         else:
             vmin, vmax = None, None
         
-        im = ax.imshow(masked_thickness, cmap=cmap, vmin=vmin, vmax=vmax)
+        # Use bilinear interpolation for smoother visual gradients
+        im = ax.imshow(masked_thickness, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='bilinear')
         
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax)
@@ -93,7 +109,7 @@ class Visualizer(VisualizerInterface):
             )
         
         # Add title and labels
-        ax.set_title('Nanofiber Thickness Map')
+        ax.set_title('Nanofiber Thickness Map (FFT-Enhanced)')
         ax.set_xlabel('X (pixels)')
         ax.set_ylabel('Y (pixels)')
         
@@ -105,6 +121,73 @@ class Visualizer(VisualizerInterface):
         plt.tight_layout()
         
         return fig
+    
+    def _enhance_with_fft(self, thickness_map: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """
+        Enhance thickness map using FFT to reveal high-frequency variations.
+        
+        This method:
+        1. Applies FFT to decompose the thickness map
+        2. Enhances high-frequency components (variations)
+        3. Reduces low-frequency components (smooth gradients)
+        4. Reconstructs the enhanced map
+        
+        Args:
+            thickness_map: Original thickness map
+            mask: Region of interest mask
+            
+        Returns:
+            FFT-enhanced thickness map
+        """
+        # Create a copy to work with
+        enhanced = thickness_map.copy().astype(np.float32)
+        
+        # Only process within the masked region
+        if mask is not None and np.any(mask):
+            # Get valid region
+            y_coords, x_coords = np.where(mask > 0)
+            if len(y_coords) > 0:
+                y_min, y_max = y_coords.min(), y_coords.max()
+                x_min, x_max = x_coords.min(), x_coords.max()
+                
+                # Extract ROI
+                roi = enhanced[y_min:y_max+1, x_min:x_max+1].copy()
+                roi_mask = mask[y_min:y_max+1, x_min:x_max+1].copy()
+                
+                # Apply FFT
+                fft_result = np.fft.fft2(roi)
+                fft_shifted = np.fft.fftshift(fft_result)
+                
+                # Create aggressive high-pass filter to enhance variations
+                h, w = roi.shape
+                cy, cx = h // 2, w // 2
+                
+                # Gaussian high-pass filter with stronger enhancement
+                y, x = np.ogrid[-cy:h-cy, -cx:w-cx]
+                # Reduced sigma for more aggressive high-pass effect
+                gaussian_hp = 1 - np.exp(-(x**2 + y**2) / (2 * (min(h, w) / 12)**2))
+                
+                # Apply filter with amplification
+                fft_filtered = fft_shifted * gaussian_hp * 2.0  # 2x amplification
+                
+                # Inverse FFT
+                fft_ishift = np.fft.ifftshift(fft_filtered)
+                roi_enhanced = np.fft.ifft2(fft_ishift).real
+                
+                # Normalize to original range
+                roi_min, roi_max = roi[roi_mask > 0].min(), roi[roi_mask > 0].max()
+                roi_enhanced_norm = (roi_enhanced - roi_enhanced.min()) / (roi_enhanced.max() - roi_enhanced.min() + 1e-8)
+                roi_enhanced_norm = roi_enhanced_norm * (roi_max - roi_min) + roi_min
+                
+                # Blend with original (85% enhanced, 15% original for more variation)
+                roi_blended = 0.85 * roi_enhanced_norm + 0.15 * roi
+                
+                # Replace in full map
+                enhanced[y_min:y_max+1, x_min:x_max+1] = roi_blended
+                
+                self.logger.info("Applied aggressive FFT-based enhancement for more color variation")
+        
+        return enhanced
     
     def create_shape_visualization(self, image: np.ndarray, contour: np.ndarray) -> Figure:
         """

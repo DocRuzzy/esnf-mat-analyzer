@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
 from pathlib import Path
 import math
+import traceback
 
 import numpy as np
 import cv2
@@ -729,6 +730,33 @@ class MainWindow(tk.Tk):
         # Update background leveling setting based on checkbox
         config.processing.leveling.enabled = self.background_leveling_var.get()
         
+        # Apply selected background correction method from GUI
+        selected_bg_method = self.bg_method_var.get()
+        bg_method_map = {
+            "none": BackgroundCorrectionMethod.NONE,
+            "basic": BackgroundCorrectionMethod.BASIC,
+            "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
+            "restore": BackgroundCorrectionMethod.RESTORE,
+            "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+        }
+        config.processing.background_correction_method = bg_method_map.get(
+            selected_bg_method, BackgroundCorrectionMethod.BASIC
+        )
+        
+        # Apply selected thickness model from GUI
+        selected_thickness_model = self.thickness_model_var.get()
+        thickness_model_map = {
+            "beer_lambert": ThicknessModelType.BEER_LAMBERT,
+            "linear": ThicknessModelType.LINEAR,
+            "logarithmic": ThicknessModelType.LOGARITHMIC,
+            "exponential": ThicknessModelType.EXPONENTIAL
+        }
+        config.thickness.model_type = thickness_model_map.get(
+            selected_thickness_model, ThicknessModelType.BEER_LAMBERT
+        )
+        
+        print(f"Analyzing with background: {selected_bg_method}, thickness: {selected_thickness_model}")
+        
         analyzer = setup_dependencies(config)
 
         # Run analysis
@@ -1361,12 +1389,11 @@ class MainWindow(tk.Tk):
             traceback.print_exc()
 
     def export_image(self):
-        """Export the current image with optional heatmap overlay.
+        """Export the current image with optional heatmap overlay using OpenCV and matplotlib colormap.
 
-        This is a robust exporter that accepts PIL Images, numpy arrays, or
-        generates an overlayed matplotlib heatmap if available. It prefers
-        PIL's save (most formats), and falls back to OpenCV after converting
-        to a proper numpy array.
+        Uses matplotlib's viridis colormap for accurate scientific visualization,
+        combined with OpenCV for efficient image processing and compositing.
+        Overlays heatmap only on the ROI region if analysis results are available.
         """
         if not self.current_image:
             print("No image to export.")
@@ -1380,110 +1407,160 @@ class MainWindow(tk.Tk):
             return
 
         try:
-            # If a heatmap exists, prefer exporting it (clean overlay)
-            if self.last_analysis_result:
-                try:
-                    vis_config = VisualizationConfig()
-                    vis_config.auto_range_heatmap = self.auto_range_var.get()
-                    visualizer = Visualizer(vis_config)
-                    fig = visualizer.create_thickness_heatmap(
-                        self.last_analysis_result.thickness_map,
-                        self.last_analysis_result.mask,
-                        self.last_analysis_result.saturation_mask
-                    )
-                    fig.canvas.draw()
-                    # Render the figure to an RGBA array and convert to PIL Image
-                    w, h = fig.canvas.get_width_height()
-                    try:
-                        buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
-                        buf.shape = (h, w, 4)
-                        # ARGB -> RGBA
-                        buf = buf[:, :, [1, 2, 3, 0]]
-                        heatmap_pil = Image.fromarray(buf, mode='RGBA')
-                    except Exception:
-                        # Fallback to RGB if ARGB not available
-                        img_rgb = Image.frombytes("RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
-                        heatmap_pil = img_rgb.convert('RGBA')
-                    # We'll blend heatmap_pil over the base image later; set img placeholder to heatmap_pil
-                    img = heatmap_pil
-                except Exception:
-                    img = None
+            import matplotlib.pyplot as plt
+            
+            # Convert base image to numpy array (BGR for OpenCV)
+            if isinstance(self.current_image, Image.Image):
+                base_rgb = np.array(self.current_image.convert('RGB'))
+                base_bgr = cv2.cvtColor(base_rgb, cv2.COLOR_RGB2BGR)
+            elif isinstance(self.current_image, np.ndarray):
+                if self.current_image.ndim == 2:
+                    base_bgr = cv2.cvtColor(self.current_image, cv2.COLOR_GRAY2BGR)
+                elif self.current_image.shape[2] == 3:
+                    base_bgr = self.current_image.copy()
+                elif self.current_image.shape[2] == 4:
+                    base_bgr = cv2.cvtColor(self.current_image, cv2.COLOR_RGBA2BGR)
+                else:
+                    raise ValueError("Unsupported image format")
             else:
-                img = None
+                raise ValueError("Unable to convert image to numpy array")
 
-            # If no heatmap image was created, try to prepare current_image
-            if img is None:
-                if isinstance(self.current_image, Image.Image):
-                    img = self.current_image
-                elif isinstance(self.current_image, np.ndarray):
-                    arr = self.current_image
-                    # If it's BGR (OpenCV), convert to RGB for PIL
-                    if arr.ndim == 3 and arr.shape[2] == 3:
-                        img = Image.fromarray(arr)
+            # If we have analysis results with thickness map, create heatmap overlay
+            if self.last_analysis_result and hasattr(self.last_analysis_result, 'thickness_map'):
+                thickness_map = self.last_analysis_result.thickness_map
+                mask = self.last_analysis_result.mask
+                
+                # Normalize thickness map to 0-1 range using brightest/darkest points
+                thickness_norm = thickness_map.copy()
+                if mask is not None:
+                    valid_thickness = thickness_norm[mask > 0]
+                    if valid_thickness.size > 0:
+                        # Find actual darkest (min) and brightest (max) pixels in ROI
+                        vmin = valid_thickness.min()
+                        vmax = valid_thickness.max()
+                        
+                        # Print the extreme values for user feedback
+                        print(f"ROI thickness range: {vmin:.2f} (lowest) to {vmax:.2f} (highest)")
+                        
+                        # Find locations of extreme values
+                        min_idx = np.unravel_index(np.argmin(thickness_norm * mask + (1 - mask) * 1e10), thickness_norm.shape)
+                        max_idx = np.unravel_index(np.argmax(thickness_norm * mask), thickness_norm.shape)
+                        print(f"Lowest pixel at: {min_idx}, Highest pixel at: {max_idx}")
+                        
+                        if vmax > vmin:
+                            # Inverted mapping: max -> 0, min -> 1
+                            # First normalize min->0, max->1
+                            thickness_norm = (thickness_norm - vmin) / (vmax - vmin)
+                            thickness_norm = np.clip(thickness_norm, 0, 1)
+                            # Invert to make lower thickness brighter
+                            thickness_norm = 1.0 - thickness_norm
+                            
+                            # Apply gamma mapping after inversion to further emphasize low levels
+                            gamma = 0.6
+                            thickness_norm = np.power(thickness_norm, gamma)
+                        else:
+                            # All pixels have same value
+                            thickness_norm = np.ones_like(thickness_norm) * 0.5
                     else:
-                        img = Image.fromarray(arr)
+                        thickness_norm = np.zeros_like(thickness_norm)
                 else:
-                    # Last resort: try to rasterize the canvas
-                    try:
-                        self.canvas.postscript(file="canvas.ps", colormode="color")
-                        img = Image.open("canvas.ps")
-                    except Exception:
-                        raise RuntimeError("Unable to obtain an image for export.")
-
-            # If we have a heatmap PIL image and a base image, composite them
-            if isinstance(img, Image.Image) and self.current_image is not None and self.last_analysis_result:
-                try:
-                    base_pil = self.current_image.convert('RGB')
-                    # Resize heatmap to match base image size
-                    heatmap_resized = img.resize(base_pil.size, resample=Image.BILINEAR).convert('RGBA')
-                    # Apply a semi-transparent alpha to make underlying image visible
-                    alpha = 0.6
-                    a = int(255 * alpha)
-                    heatmap_resized.putalpha(a)
-                    base_rgba = base_pil.convert('RGBA')
-                    composite = Image.alpha_composite(base_rgba, heatmap_resized)
-                    out_img = composite.convert('RGB')
-                    out_img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
-                    print(f"Image saved to {filepath} (heatmap overlaid)")
-                    return
-                except Exception:
-                    # If compositing fails, fall back to saving heatmap alone
-                    try:
-                        img_rgb = img.convert('RGB')
-                        img_rgb.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
-                        print(f"Image saved to {filepath} (heatmap only)")
-                        return
-                    except Exception:
-                        pass
-
-            # Ensure RGB mode and save using PIL for non-heatmap images
-            if getattr(img, 'mode', None) != 'RGB':
-                img = img.convert('RGB')
-
-            img.save(filepath, format='PNG' if filepath.lower().endswith('.png') else 'JPEG')
-            print(f"Image saved to {filepath}")
-            return
-        except Exception as e:
-            # Fallback: convert to numpy and use OpenCV imwrite
-            try:
-                if isinstance(img, Image.Image):
-                    arr = np.array(img)
-                elif isinstance(self.current_image, np.ndarray):
-                    arr = self.current_image
-                else:
-                    arr = np.array(self.current_image)
-
-                if arr.ndim == 3 and arr.shape[2] == 3:
-                    # If array is RGB, convert to BGR for OpenCV
-                    cv2.imwrite(filepath, cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
-                else:
-                    cv2.imwrite(filepath, arr)
-
-                print(f"Image saved to {filepath} using OpenCV fallback")
+                    # No mask: use full image range
+                    vmin = thickness_norm.min()
+                    vmax = thickness_norm.max()
+                    print(f"Full image thickness range: {vmin:.2f} to {vmax:.2f}")
+                    if vmax > vmin:
+                        thickness_norm = (thickness_norm - vmin) / (vmax - vmin)
+                    else:
+                        thickness_norm = np.ones_like(thickness_norm) * 0.5
+                
+                # Apply matplotlib colormap (viridis)
+                cmap = plt.get_cmap('viridis')
+                heatmap_rgba = cmap(thickness_norm)  # Returns RGBA in 0-1 range
+                
+                # Convert to 8-bit RGB
+                heatmap_rgb = (heatmap_rgba[:, :, :3] * 255).astype(np.uint8)
+                
+                # Convert RGB to BGR for OpenCV
+                heatmap_bgr = cv2.cvtColor(heatmap_rgb, cv2.COLOR_RGB2BGR)
+                
+                # Apply mask if available - set non-masked areas to black for better contrast
+                if mask is not None:
+                    # Create 3-channel mask
+                    mask_bool = mask > 0
+                    for i in range(3):
+                        heatmap_bgr[:, :, i] = heatmap_bgr[:, :, i] * mask_bool
+                
+                # Get ROI coordinates from metadata
+                meta = getattr(self.last_analysis_result, 'metadata', {}) or {}
+                user_roi = meta.get('user_roi', None)
+                roi_shape = meta.get('roi_shape', None)
+                
+                # Resolve ROI coordinates
+                x1 = y1 = x2 = y2 = None
+                if user_roi and len(user_roi) == 4:
+                    u0, u1, u2, u3 = user_roi
+                    # Interpret as (x1, y1, x2, y2) - most common format
+                    x1, y1 = int(u0), int(u1)
+                    # Check if u2, u3 are coordinates or dimensions
+                    if roi_shape and len(roi_shape) >= 2:
+                        roi_h, roi_w = int(roi_shape[0]), int(roi_shape[1])
+                        x2, y2 = x1 + roi_w, y1 + roi_h
+                    else:
+                        # Assume coordinates
+                        x2, y2 = int(u2), int(u3)
+                
+                # Ensure valid ROI bounds
+                if x1 is not None and x2 is not None:
+                    x1 = max(0, min(x1, base_bgr.shape[1]))
+                    x2 = max(0, min(x2, base_bgr.shape[1]))
+                    y1 = max(0, min(y1, base_bgr.shape[0]))
+                    y2 = max(0, min(y2, base_bgr.shape[0]))
+                    
+                    roi_w = x2 - x1
+                    roi_h = y2 - y1
+                    
+                    if roi_w > 0 and roi_h > 0:
+                        # Resize heatmap to match ROI dimensions
+                        heatmap_resized = cv2.resize(heatmap_bgr, (roi_w, roi_h), interpolation=cv2.INTER_LINEAR)
+                        
+                        # Darken the ROI region of base image for better heatmap visibility
+                        roi_region = base_bgr[y1:y2, x1:x2].copy()
+                        roi_darkened = (roi_region * 0.3).astype(np.uint8)  # Darken to 30% intensity
+                        
+                        # Create overlay with alpha blending on darkened background
+                        alpha = 0.85  # Higher alpha for more prominent heatmap
+                        blended_roi = cv2.addWeighted(roi_darkened, 1 - alpha, heatmap_resized, alpha, 0)
+                        
+                        # Copy blended ROI back to base image
+                        result_bgr = base_bgr.copy()
+                        result_bgr[y1:y2, x1:x2] = blended_roi
+                        
+                        # Save using OpenCV
+                        cv2.imwrite(filepath, result_bgr)
+                # Fallback: overlay on entire image if ROI not available
+                if heatmap_bgr.shape[:2] != base_bgr.shape[:2]:
+                    heatmap_bgr = cv2.resize(heatmap_bgr, (base_bgr.shape[1], base_bgr.shape[0]), 
+                                            interpolation=cv2.INTER_LINEAR)
+                
+                # Darken base image for better heatmap visibility
+                base_darkened = (base_bgr * 0.3).astype(np.uint8)
+                alpha = 0.85
+                result_bgr = cv2.addWeighted(base_darkened, 1 - alpha, heatmap_bgr, alpha, 0)
+                
+                alpha = 0.6
+                result_bgr = cv2.addWeighted(base_bgr, 1 - alpha, heatmap_bgr, alpha, 0)
+                cv2.imwrite(filepath, result_bgr)
+                print(f"Image saved to {filepath} (heatmap overlaid on full image)")
                 return
-            except Exception as e2:
-                print(f"Export failed: {e} | fallback failed: {e2}")
-                messagebox.showerror("Export Error", f"Failed to save image: {e2}")
+            
+            # No analysis results - just save the base image
+            cv2.imwrite(filepath, base_bgr)
+            print(f"Image saved to {filepath}")
+            
+        except Exception as e:
+            print(f"Export failed: {e}")
+            traceback.print_exc()
+            messagebox.showerror("Export Error", f"Failed to save image: {e}")
 
     def display_results(self, result):
         # Create a new window to display results

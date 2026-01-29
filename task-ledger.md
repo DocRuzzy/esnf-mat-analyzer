@@ -26,6 +26,15 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by the A
 | T003 | Expose recommendation weights in GUI | TODO | T002 | - | Add sliders for (w_dyn, w_sig, w_sat) in `MainWindow`, persist via `config_manager`. Unit tests to verify persistence. |
 | T004 | Fix OpenCV cvtColor empty-source crash | IN-PROGRESS | - | Need repro images | Defensive checks added; awaiting failing image to finalize fix and tests. |
 
+| ID | Title | Status | Prereq | Block Reason | Notes / Next Action |
+|----|-------|--------|--------|--------------|---------------------|
+| T040 | Smooth heatmap gradients and color transitions | DONE | - | - | Added mild Gaussian display smoothing and bilinear interpolation in `esnf_mat_analyzer/visualization/visualization.py` to improve gradient smoothness. Widened percentile range by ±1 for smoother color scaling. Completion: 2026-01-26 |
+
+| ID | Task | Status | Prerequisites | Blocking Reasons | Notes |
+|----|------|--------|----------------|------------------|-------|
+| 1 | Enhance low-level contrast in heatmap export | DONE | None | None | Applied gamma mapping (0.6) to normalized ROI thickness values and inverted normalization (max→0, min→1) in `esnf_mat_analyzer/gui/main_window.py` to make low thickness brighter and more distinguishable. Completion: 2025-12-14 |
+| 2 | Add GUI slider for heatmap gamma | TODO | 1 | None | Expose gamma control (0.2–1.5) in Image Controls; persist to user config and use in export.
+
 ## Completed Tasks
 
 - T007 Improve multiscale uniformity computation robustness (2025-10-05)
@@ -73,5 +82,5 @@ After every task completion or status change, this file must be updated by the A
 
 ## Audit / Recent Activity
 
-- Last verification: 2025-10-05 — ledger cleaned, duplicate rows removed, active tasks consolidated. Recent edits: multiscale robustness (T007), analyzer safety fixes, and harness tuning runs. 
+- Last verification: 2026-01-26 — Updated heatmap gradient smoothing (T040) and visualization interpolation; verified no syntax errors and improved perceived gradient in GUI heatmap. Prior entries preserved. 
 
