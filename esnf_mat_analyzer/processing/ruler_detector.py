@@ -170,22 +170,22 @@ class RulerDetector:
                 props2 = line_props[j]
 
                 thickness = abs(props1['y_avg'] - props2['y_avg'])
-                if not (self.config.scoring.min_thickness_px <= thickness <= self.config.scoring.max_thickness_px):
+                if not (self.config.scoring['min_thickness_px'] <= thickness <= self.config.scoring['max_thickness_px']):
                     continue
 
                 # Calculate score components
-                length_score = (props1['length'] + props2['length']) * self.config.scoring.length_weight
+                length_score = (props1['length'] + props2['length']) * self.config.scoring['length_weight']
 
                 overlap_start = max(props1['x_coords'][0], props2['x_coords'][0])
                 overlap_end = min(props1['x_coords'][1], props2['x_coords'][1])
                 overlap = max(0, overlap_end - overlap_start)
-                overlap_score = overlap * self.config.scoring.overlap_weight
+                overlap_score = overlap * self.config.scoring['overlap_weight']
 
-                parallelism_penalty = abs(props1['angle'] - props2['angle']) * self.config.scoring.parallelism_penalty
+                parallelism_penalty = abs(props1['angle'] - props2['angle']) * self.config.scoring['parallelism_penalty']
 
                 # Simplified tick count for scoring
                 num_ticks = self._count_ticks_between_lines(props1, props2, vertical_lines)
-                tick_score = num_ticks * self.config.scoring.tick_count_weight
+                tick_score = num_ticks * self.config.scoring['tick_count_weight']
 
                 total_score = length_score + overlap_score - parallelism_penalty + tick_score
 

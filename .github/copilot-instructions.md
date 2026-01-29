@@ -1,18 +1,21 @@
 # ESNF Mat Analyzer - AI Coding Agent Instructions
 
 ## Project Overview
-Scientific Python package for electrospun nanofiber mat analysis with a focus on **background correction methods** and **uniformity metrics**. The project follows JOSS (Journal of Open Source Software) standards with a modular architecture built around dependency injection and interface patterns.
+Scientific Python package for electrospun nanofiber mat analysis with a focus on **background correction methods**, **uniformity metrics**, and **thickness calibration**. The project follows JOSS (Journal of Open Source Software) standards with a modular architecture built around dependency injection and interface patterns.
 
 ## Architecture & Key Components
 
 ### Core Pipeline (Process Order)
 1. **Image Loading** → `esnf_mat_analyzer/processing/image_processor.py`
 2. **Ruler Detection** → `esnf_mat_analyzer/processing/ruler_detector.py` (spatial calibration)
-3. **Background Correction** → `esnf_mat_analyzer/processing/background_correction/` (4 methods: BASIC, rolling ball, RESTORE, homomorphic)
-4. **ROI Detection** → `esnf_mat_analyzer/processing/shape_detector.py` (gel boundary detection)
-5. **Thickness Estimation** → `esnf_mat_analyzer/processing/thickness_estimator.py`
-6. **Uniformity Analysis** → `esnf_mat_analyzer/analysis/uniformity_metrics.py`
-7. **Results Export** → `esnf_mat_analyzer/utils/data_exporter.py`
+3. **Three-Region Detection** → `esnf_mat_analyzer/processing/region_detector.py` (background/gel/mat segmentation)
+4. **Background Correction** → `esnf_mat_analyzer/processing/background_correction/` (4 methods)
+5. **ROI Detection** → `esnf_mat_analyzer/processing/shape_detector.py` (gel boundary detection)
+6. **Intensity Calibration** → `esnf_mat_analyzer/processing/calibration.py` (0-100 normalized scale)
+7. **Thickness Estimation** → `esnf_mat_analyzer/processing/thickness_estimator.py`
+8. **Uniformity Analysis** → `esnf_mat_analyzer/analysis/uniformity_metrics.py`
+9. **Gel Boundary Analysis** → `esnf_mat_analyzer/analysis/gel_boundary_analysis.py`
+10. **Results Export** → `esnf_mat_analyzer/utils/data_exporter.py`
 
 ### Background Correction Architecture (Active Development Focus)
 ```
@@ -25,10 +28,38 @@ esnf_mat_analyzer/processing/background_correction/
 ```
 
 **Critical Pattern**: Each background correction class provides method selection via enum:
-- `BackgroundCorrectionMethod.BASIC` → NMF-based machine learning approach
-- `BackgroundCorrectionMethod.ROLLING_BALL` → 3D morphological processing
-- `BackgroundCorrectionMethod.RESTORE` → Iterative deconvolution
-- `BackgroundCorrectionMethod.HOMOMORPHIC` → Frequency domain filtering
+- `BackgroundCorrectionMethod.NONE` → No correction (preserves raw data)
+- `BackgroundCorrectionMethod.POLYNOMIAL_SURFACE` → 2D polynomial fitting (recommended default)
+- `BackgroundCorrectionMethod.LARGE_KERNEL_BLUR` → Morphological background estimation
+- `BackgroundCorrectionMethod.COMPLETE_WORKFLOW` → Full 4-step workflow with optional homomorphic FFT
+
+### New Modules (2026-01-29)
+
+#### Synthetic Data Generation (`esnf_mat_analyzer/data/synthetic_mat_generator.py`)
+- Generates ground-truth thickness maps for pipeline validation
+- Patterns: uniform, radial_gradient, gaussian_spots, multi_frequency, realistic_mat, calibration_target
+- Use for testing FFT filtering behavior and calibration accuracy
+
+#### Frequency Diagnostics (`esnf_mat_analyzer/analysis/frequency_diagnostics.py`)
+- Analyzes spatial frequency content before/after processing
+- Identifies which real features are being removed by filtering
+- Use when heatmaps appear "smoothed" or missing fine details
+
+#### Three-Region Detection (`esnf_mat_analyzer/processing/region_detector.py`)
+- Segments images into: background (collection surface), gel (dark perimeter), mat (bright deposition)
+- Gel is darker than background (wet polymer absorbs light)
+- Use for proper intensity calibration and gel influence studies
+
+#### Intensity Calibration (`esnf_mat_analyzer/processing/calibration.py`)
+- Converts intensity to normalized 0-100 thickness scale
+- Black reference: background outside mat (0 = no thickness)
+- White reference: saturation level OR max intensity (100 = max thickness)
+- Optional physical calibration in micrometers with marked reference point
+
+#### Gel Boundary Analysis (`esnf_mat_analyzer/analysis/gel_boundary_analysis.py`)
+- Quantifies gel shape: circularity, irregularity, aspect ratio, solidity
+- Correlates gel shape with mat uniformity (edge effects)
+- Supports investigation of gel influence on deposition uniformity
 
 ## Entry Points & Interface Patterns
 
@@ -52,6 +83,32 @@ analyzer = setup_dependencies(config)  # Returns fully configured NanoFiberAnaly
 - **YAML/JSON loading**: `esnf_mat_analyzer/config/config_manager.py`
 - **Enum-based method selection**: Background correction, thickness models, etc.
 
+## FFT Enhancement (Critical - May Remove Real Features)
+
+**Default: DISABLED** — FFT enhancement in visualization can remove real thickness variations.
+
+Configuration in `VisualizationConfig`:
+- `fft_enhancement_enabled: bool = False` — Master switch (keep False unless needed)
+- `fft_blend_ratio: float = 0.0` — 0=no FFT, 1=full FFT (recommend ≤0.3 if enabled)
+- `fft_sigma_divisor: float = 12.0` — Higher=gentler filtering, preserves more features
+
+**When to enable FFT**: Only when strong illumination gradients obscure thickness variations
+AND you've verified with synthetic data that real features aren't being removed.
+
+**Validation workflow**:
+```python
+from esnf_mat_analyzer.data.synthetic_mat_generator import SyntheticMatGenerator
+from esnf_mat_analyzer.analysis.frequency_diagnostics import FrequencyDiagnostics
+
+# Generate known-frequency test pattern
+gen = SyntheticMatGenerator()
+result = gen.generate()  # Multi-frequency pattern
+
+# Analyze what filtering removes
+diag = FrequencyDiagnostics()
+report = diag.generate_diagnostic_report(original, filtered, ground_truth=result.ground_truth_thickness)
+```
+
 ## Development Workflows
 
 ### Testing Strategy
@@ -63,26 +120,27 @@ pytest tests/gui/              # GUI-specific tests
 pytest -m "not slow"           # Skip computationally expensive tests
 ```
 
-### Background Correction Development Workflow
+### Synthetic Data Validation Workflow
 ```python
-# Testing all background correction methods
-python test_all_background_methods.py  # CLI comparison tool
-python test_background_correction.py   # Validation script
+# Generate validation suite
+from esnf_mat_analyzer.data.synthetic_mat_generator import SyntheticMatGenerator, generate_fft_validation_set
+from pathlib import Path
 
-# GUI integration testing
-python test_gui_background_integration.py
+gen = SyntheticMatGenerator()
+results = gen.generate_validation_suite(Path("test_data/synthetic"))
+fft_results = generate_fft_validation_set(Path("test_data/synthetic"))
 ```
 
 ### Adding New Background Correction Methods
 1. **Add enum value**: `BackgroundCorrectionMethod` in `data_types.py`
 2. **Implement method**: In appropriate `background_correction/*.py` file
-3. **Update GUI mapping**: Radio buttons in `gui/main_window.py` lines 120-130
+3. **Update GUI mapping**: Radio buttons in `gui/main_window.py` 
 4. **Add configuration**: Update `config_manager.py` enum mappings
 5. **Add tests**: Create test in `tests/integration/test_*_background_correction.py`
 
 ## Project-Specific Conventions
 
-### File Organization Standards (Recently Reorganized)
+### File Organization Standards
 - **Tests**: All in `tests/` with subdirectories (unit/, integration/, gui/, data/)
 - **Scripts**: Debug/benchmark tools in `scripts/debug/`, `scripts/benchmarks/`
 - **Examples**: Demo files in `examples/`
@@ -90,8 +148,15 @@ python test_gui_background_integration.py
 
 ### Import Path Patterns
 ```python
-# Background correction imports (new structure)
+# Background correction imports
 from esnf_mat_analyzer.processing.background_correction.advanced import AdvancedBackgroundProcessor
+
+# New modules (2026-01-29)
+from esnf_mat_analyzer.processing.region_detector import ThreeRegionDetector
+from esnf_mat_analyzer.processing.calibration import IntensityCalibrator
+from esnf_mat_analyzer.analysis.gel_boundary_analysis import GelBoundaryAnalyzer
+from esnf_mat_analyzer.analysis.frequency_diagnostics import FrequencyDiagnostics
+from esnf_mat_analyzer.data.synthetic_mat_generator import SyntheticMatGenerator
 
 # Core components
 from esnf_mat_analyzer.core.analyzer import NanoFiberAnalyzer
@@ -142,18 +207,49 @@ def analyze_correction_quality(original, corrected, mask=None):
 
 When working with this codebase, prioritize understanding the background correction pipeline as it's the primary development focus and affects all downstream analysis quality.
 
-## Task Ledger Update Requirement (R-LEDGER-UPDATE)
-An AI-maintained file `task-ledger.md` at the repository root tracks tasks (ID, status, prerequisites, blocking reasons). After every task completion or status change performed via the AI assistant, the assistant MUST:
-1. Update the task's status (e.g., TODO → IN-PROGRESS → DONE).
-2. Add completion date when moving to DONE.
-3. Add or adjust blocking reasons if prerequisites not met.
-4. Append any new tasks created during the change.
-5. Maintain formatting and table integrity.
-6. Ensure this requirement section remains present.
+## Task Tracking (Hybrid Approach)
 
-Statuses: `TODO`, `IN-PROGRESS`, `BLOCKED`, `DONE`, `DEFERRED`.
+This project uses a **hybrid task tracking system** designed for AI assistant limitations (no persistent memory between sessions):
 
-If the ledger is missing, recreate it with current known tasks before proceeding.
+### Two Files, Two Purposes
+
+1. **`CURRENT.md`** (Session Focus)
+   - Active tasks for current development focus
+   - Updated at **start** of each session (read it first!)
+   - Updated at **end** of session with progress
+   - Lightweight, 3-5 active tasks max
+   - Contains: priorities, recently completed, blockers, session notes
+
+2. **`task-ledger.md`** (Audit Trail)
+   - Complete historical record of all tasks (T001, T002, etc.)
+   - Formal tracking with IDs, statuses, prerequisites, completion dates
+   - Updated when tasks are **completed** (move from CURRENT.md to ledger)
+   - Reference for what was done and when
+
+### Workflow for AI Assistant
+
+**At Session Start:**
+1. Read `CURRENT.md` to understand active priorities
+2. Reference task IDs (T050, etc.) when they exist
+
+**During Session:**
+- Use informal numbered steps for planning (this is natural and fine)
+- Work through CURRENT.md priorities in order
+- Note any blockers or new tasks discovered
+
+**At Session End (or when completing significant work):**
+1. Update `CURRENT.md` - mark completed items, add new active tasks
+2. Update `task-ledger.md` - move completed tasks to DONE with dates
+3. Add any new tasks to ledger with next available ID
+
+### Task Statuses (for ledger)
+`TODO` | `IN-PROGRESS` | `BLOCKED` | `DONE` | `DEFERRED`
+
+### Why This Works
+- **CURRENT.md** is small enough to always fit in context
+- In-conversation TODOs are acceptable for planning steps
+- **task-ledger.md** provides the audit trail without being the active workflow
+- No conflict between conversational planning and formal tracking
 
 ## Branch Naming Convention
 When creating feature or fix branches, follow a numeric minor-increment policy derived from the current branch name when that branch uses a numeric suffix. Rules:

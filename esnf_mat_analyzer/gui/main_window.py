@@ -283,6 +283,86 @@ class MainWindow(tk.Tk):
         )
         self.compare_models_button.pack(padx=5, pady=5)
 
+        # --- FFT Enhancement Controls ---
+        self.fft_frame = ttk.LabelFrame(self.analysis_frame, text="Heatmap FFT Enhancement")
+        self.fft_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # FFT enable checkbox (default OFF to preserve features)
+        self.fft_enabled_var = tk.BooleanVar(value=False)
+        self.fft_checkbox = ttk.Checkbutton(
+            self.fft_frame,
+            text="Enable FFT Enhancement (may remove real features)",
+            variable=self.fft_enabled_var
+        )
+        self.fft_checkbox.pack(anchor=tk.W, padx=5, pady=2)
+        
+        # FFT blend ratio slider
+        fft_blend_frame = ttk.Frame(self.fft_frame)
+        fft_blend_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(fft_blend_frame, text="FFT Blend (0=off, 1=full):").pack(side=tk.LEFT)
+        self.fft_blend_var = tk.DoubleVar(value=0.0)
+        self.fft_blend_scale = ttk.Scale(
+            fft_blend_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL,
+            variable=self.fft_blend_var, length=150
+        )
+        self.fft_blend_scale.pack(side=tk.LEFT, padx=5)
+        self.fft_blend_label = ttk.Label(fft_blend_frame, text="0.00")
+        self.fft_blend_label.pack(side=tk.LEFT)
+        self.fft_blend_var.trace_add('write', lambda *a: self.fft_blend_label.configure(
+            text=f"{self.fft_blend_var.get():.2f}"))
+        
+        # FFT sigma divisor (higher = gentler filtering)
+        fft_sigma_frame = ttk.Frame(self.fft_frame)
+        fft_sigma_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(fft_sigma_frame, text="Filter Gentleness (sigma divisor):").pack(side=tk.LEFT)
+        self.fft_sigma_var = tk.DoubleVar(value=12.0)
+        ttk.Spinbox(fft_sigma_frame, from_=4.0, to=50.0, increment=2.0,
+                   textvariable=self.fft_sigma_var, width=6).pack(side=tk.LEFT, padx=5)
+        ttk.Label(fft_sigma_frame, text="(larger = preserves more features)", 
+                 foreground="#666").pack(side=tk.LEFT)
+        
+        # FFT info label
+        ttk.Label(self.fft_frame, 
+                 text="⚠️ FFT enhancement can remove real thickness variations.\n"
+                      "Keep disabled (blend=0) unless background removal is critical.",
+                 foreground="#884400", wraplength=280).pack(padx=5, pady=3)
+
+        # --- Calibration Settings ---
+        self.calibration_frame = ttk.LabelFrame(self.analysis_frame, text="Thickness Calibration")
+        self.calibration_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Saturation threshold
+        sat_frame = ttk.Frame(self.calibration_frame)
+        sat_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(sat_frame, text="Saturation Threshold:").pack(side=tk.LEFT)
+        self.saturation_threshold_var = tk.IntVar(value=254)
+        ttk.Spinbox(sat_frame, from_=200, to=255, textvariable=self.saturation_threshold_var,
+                   width=6).pack(side=tk.LEFT, padx=5)
+        
+        # Show saturation warning checkbox
+        self.show_saturation_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self.calibration_frame,
+            text="Highlight saturated regions (red overlay)",
+            variable=self.show_saturation_var
+        ).pack(anchor=tk.W, padx=5, pady=2)
+        
+        # Detect gel boundary checkbox
+        self.detect_gel_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self.calibration_frame,
+            text="Detect gel boundary (dark perimeter)",
+            variable=self.detect_gel_var
+        ).pack(anchor=tk.W, padx=5, pady=2)
+        
+        # Gel analysis button
+        self.gel_analysis_button = ttk.Button(
+            self.calibration_frame,
+            text="Analyze Gel Boundary Shape",
+            command=self.analyze_gel_boundary
+        )
+        self.gel_analysis_button.pack(padx=5, pady=3)
+
         self.analyze_button = ttk.Button(
             self.analysis_frame, text="Analyze", command=self.analyze
         )
@@ -776,9 +856,18 @@ class MainWindow(tk.Tk):
                 print("Please run an analysis first.")
             return
 
-        # Create a visualizer with custom configuration
+        # Create a visualizer with custom configuration including FFT settings
         vis_config = VisualizationConfig()
         vis_config.auto_range_heatmap = self.auto_range_var.get()
+        
+        # Apply FFT enhancement settings from GUI
+        vis_config.fft_enhancement_enabled = self.fft_enabled_var.get()
+        vis_config.fft_blend_ratio = self.fft_blend_var.get()
+        vis_config.fft_sigma_divisor = self.fft_sigma_var.get()
+        
+        # Apply saturation display setting
+        vis_config.show_saturated = self.show_saturation_var.get()
+        
         visualizer = Visualizer(vis_config)
 
         # Create the heatmap figure
@@ -814,6 +903,12 @@ class MainWindow(tk.Tk):
                 try:
                     vis_config = VisualizationConfig()
                     vis_config.auto_range_heatmap = self.auto_range_var.get()
+                    # Apply FFT enhancement settings from GUI
+                    vis_config.fft_enhancement_enabled = self.fft_enabled_var.get()
+                    vis_config.fft_blend_ratio = self.fft_blend_var.get()
+                    vis_config.fft_sigma_divisor = self.fft_sigma_var.get()
+                    vis_config.show_saturated = self.show_saturation_var.get()
+                    
                     visualizer = Visualizer(vis_config)
                     fig = visualizer.create_thickness_heatmap(
                         self.last_analysis_result.thickness_map,
@@ -1234,6 +1329,139 @@ class MainWindow(tk.Tk):
             
         except Exception as e:
             tk.messagebox.showerror("Error", f"Model comparison failed: {str(e)}")
+
+    def analyze_gel_boundary(self):
+        """Analyze the gel boundary shape and its influence on mat uniformity."""
+        if not self.current_image:
+            tk.messagebox.showwarning("Warning", "Please select an image first.")
+            return
+
+        try:
+            from esnf_mat_analyzer.processing.region_detector import ThreeRegionDetector
+            from esnf_mat_analyzer.analysis.gel_boundary_analysis import GelBoundaryAnalyzer
+            
+            # Convert image to grayscale numpy array
+            img_array = np.array(self.current_image.convert('L'))
+            
+            # Detect three regions
+            detector = ThreeRegionDetector(gel_detection_enabled=self.detect_gel_var.get())
+            
+            # Get ROI if defined
+            roi = self.get_roi_coordinates()
+            roi_mask = None
+            if roi:
+                x1, y1, x2, y2 = roi
+                roi_mask = np.zeros(img_array.shape, dtype=np.uint8)
+                roi_mask[y1:y2, x1:x2] = 1
+            
+            result = detector.detect(img_array, roi_mask)
+            
+            # Create results window
+            results_window = tk.Toplevel(self)
+            results_window.title("Gel Boundary Analysis")
+            results_window.geometry("900x700")
+            
+            # Create matplotlib figure
+            fig = Figure(figsize=(12, 8))
+            
+            # Subplot 1: Region visualization
+            ax1 = fig.add_subplot(2, 2, 1)
+            vis = detector.visualize_regions(img_array, result)
+            ax1.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
+            ax1.set_title("Detected Regions\n(Green=Mat, Blue=Background, Red=Gel)")
+            ax1.axis('off')
+            
+            # Subplot 2: Original with intensity info
+            ax2 = fig.add_subplot(2, 2, 2)
+            ax2.imshow(img_array, cmap='gray')
+            ax2.set_title(f"Reference Intensities\nBackground: {result.background_intensity:.1f}, "
+                         f"Gel: {result.gel_intensity:.1f}")
+            ax2.axis('off')
+            
+            # Analyze gel shape if detected
+            if result.gel_detected:
+                analyzer = GelBoundaryAnalyzer()
+                metrics = analyzer.analyze_gel_shape(
+                    result.gel_mask, img_array.shape[:2], result.gel_contour
+                )
+                
+                # Subplot 3: Metrics text
+                ax3 = fig.add_subplot(2, 2, 3)
+                ax3.axis('off')
+                
+                metrics_text = f"""GEL BOUNDARY SHAPE METRICS
+{'='*40}
+
+Circularity: {metrics.circularity:.3f}
+  (1.0 = perfect circle)
+
+Irregularity: {metrics.irregularity:.3f}
+  (0 = smooth, higher = rough)
+
+Aspect Ratio: {metrics.aspect_ratio:.2f}
+  (1.0 = circular, >1 = elongated)
+
+Solidity: {metrics.solidity:.3f}
+  (area / convex hull)
+
+Center Offset: {metrics.center_offset*100:.1f}%
+  (offset from image center)
+
+Area: {metrics.area_pixels:.0f} pixels
+Perimeter: {metrics.perimeter_pixels:.0f} pixels
+
+{'='*40}
+Quality Score: {result.quality_score:.2f}
+"""
+                ax3.text(0.05, 0.95, metrics_text, transform=ax3.transAxes,
+                        fontsize=10, fontfamily='monospace',
+                        verticalalignment='top')
+                
+                # Subplot 4: Saturation analysis
+                ax4 = fig.add_subplot(2, 2, 4)
+                if result.saturation_pct > 0:
+                    sat_vis = np.zeros((*img_array.shape, 3), dtype=np.uint8)
+                    sat_vis[:, :, 0] = img_array  # Red channel
+                    sat_vis[:, :, 1] = img_array  # Green channel  
+                    sat_vis[:, :, 2] = img_array  # Blue channel
+                    sat_vis[result.saturation_mask.astype(bool), 0] = 255  # Highlight in red
+                    sat_vis[result.saturation_mask.astype(bool), 1] = 0
+                    sat_vis[result.saturation_mask.astype(bool), 2] = 0
+                    ax4.imshow(sat_vis)
+                    ax4.set_title(f"⚠️ Saturation: {result.saturation_pct:.1f}% of mat\n"
+                                 f"(Red regions = unknown thickness)")
+                else:
+                    ax4.imshow(img_array, cmap='gray')
+                    ax4.set_title("✓ No saturation detected")
+                ax4.axis('off')
+                
+                # Notes
+                if metrics.notes:
+                    note_str = "\n".join(f"• {n}" for n in metrics.notes)
+                    fig.text(0.5, 0.02, f"Notes: {note_str}", ha='center', fontsize=9)
+            else:
+                # No gel detected
+                ax3 = fig.add_subplot(2, 2, 3)
+                ax3.axis('off')
+                ax3.text(0.5, 0.5, "No distinct gel region detected.\n\n"
+                        "The gel boundary may not be visible in this image,\n"
+                        "or the detection threshold needs adjustment.",
+                        ha='center', va='center', fontsize=11)
+                
+                ax4 = fig.add_subplot(2, 2, 4)
+                ax4.imshow(img_array, cmap='gray')
+                ax4.set_title(f"Saturation: {result.saturation_pct:.1f}%")
+                ax4.axis('off')
+            
+            fig.tight_layout()
+            
+            # Embed in tkinter
+            canvas = FigureCanvasTkAgg(fig, master=results_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Gel boundary analysis failed: {str(e)}\n\n{traceback.format_exc()}")
 
     def get_roi_coordinates(self):
         """Get ROI coordinates from canvas rectangle."""

@@ -1,0 +1,387 @@
+{
+  "timestamp": "2026-01-29T15:56:10.126579",
+  "image_path": "tests\\Samples\\TCD4-GPED4.0.png",
+  "total_tests": 117,
+  "top_results": [
+    {
+      "rank": 1,
+      "overall_score": 0.8833582154205903,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 0.9,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.41679107710295205
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.02290802385852567,
+        "entropy": 7.603547763744146,
+        "high_freq_power": 0.029515860707184267,
+        "gradient_magnitude": 0.04967312721131916,
+        "dynamic_range": 0.9484033497973057,
+        "percentile_range": 0.7672425410332411,
+        "global_gradient_strength": 0.3961110242455874
+      }
+    },
+    {
+      "rank": 2,
+      "overall_score": 0.881516915623983,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 1.0,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.40758457811991555
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.024136160827687596,
+        "entropy": 7.682772591288844,
+        "high_freq_power": 0.03502204261833262,
+        "gradient_magnitude": 0.05175528465059761,
+        "dynamic_range": 0.9606299212598426,
+        "percentile_range": 0.7913385826771654,
+        "global_gradient_strength": 0.40236400769407676
+      }
+    },
+    {
+      "rank": 3,
+      "overall_score": 0.8806890931813111,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 1.1,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.4034454659065555
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.025128456066569785,
+        "entropy": 7.668540740617271,
+        "high_freq_power": 0.04083247835911024,
+        "gradient_magnitude": 0.05350265981193591,
+        "dynamic_range": 0.9690534465920565,
+        "percentile_range": 0.8100516879860972,
+        "global_gradient_strength": 0.40517526094129586
+      }
+    },
+    {
+      "rank": 4,
+      "overall_score": 0.8776344794666648,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 0.85,
+        "thickness_gamma": 0.9,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.3881723973333243
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.02259104836651382,
+        "entropy": 7.588188478620013,
+        "high_freq_power": 0.028023454445700275,
+        "gradient_magnitude": 0.049205541601018886,
+        "dynamic_range": 0.9336312870430022,
+        "percentile_range": 0.7572360057701779,
+        "global_gradient_strength": 0.41554861189392467
+      }
+    },
+    {
+      "rank": 5,
+      "overall_score": 0.8766080351750988,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 0.9,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 2.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.3830401758754941
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.020124810362262973,
+        "entropy": 7.524478440868906,
+        "high_freq_power": 0.029873673654075786,
+        "gradient_magnitude": 0.04525746535622023,
+        "dynamic_range": 0.8934744751608675,
+        "percentile_range": 0.7165857789870532,
+        "global_gradient_strength": 0.4190343773177763
+      }
+    },
+    {
+      "rank": 6,
+      "overall_score": 0.8749052047484241,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 0.85,
+        "thickness_gamma": 1.0,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.37452602374212096
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.023940285755730456,
+        "entropy": 7.669033684088344,
+        "high_freq_power": 0.03333465849148538,
+        "gradient_magnitude": 0.05141922181866053,
+        "dynamic_range": 0.9488188976377953,
+        "percentile_range": 0.7834645669291338,
+        "global_gradient_strength": 0.42481712409980477
+      }
+    },
+    {
+      "rank": 7,
+      "overall_score": 0.8739671563395718,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 1.0,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 2.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.36983578169785947
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.021135857714756904,
+        "entropy": 7.602767252720939,
+        "high_freq_power": 0.03575420998692368,
+        "gradient_magnitude": 0.04711069770959298,
+        "dynamic_range": 0.9133858267716536,
+        "percentile_range": 0.7401574803149605,
+        "global_gradient_strength": 0.4280027004981962
+      }
+    },
+    {
+      "rank": 8,
+      "overall_score": 0.8732344782869375,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 0.85,
+        "thickness_gamma": 1.1,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 3.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.3661723914346876
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.025055745178224013,
+        "entropy": 7.656721773950245,
+        "high_freq_power": 0.03895468855039608,
+        "gradient_magnitude": 0.053300981458969054,
+        "dynamic_range": 0.9597035750594012,
+        "percentile_range": 0.8043318901894704,
+        "global_gradient_strength": 0.4304908470480605
+      }
+    },
+    {
+      "rank": 9,
+      "overall_score": 0.8724242860319572,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 1.0,
+        "thickness_gamma": 1.1,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 2.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.3621214301597865
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.02192028711485369,
+        "entropy": 7.589822148868579,
+        "high_freq_power": 0.041978151337754,
+        "gradient_magnitude": 0.048643664768738444,
+        "dynamic_range": 0.9283054277003943,
+        "percentile_range": 0.758448435023503,
+        "global_gradient_strength": 0.4332422288544454
+      }
+    },
+    {
+      "rank": 10,
+      "overall_score": 0.8720750305849373,
+      "params": {
+        "bg_correction": "rolling_ball",
+        "bg_strength": 0.7,
+        "thickness_gamma": 0.9,
+        "local_contrast_enhance": true,
+        "contrast_clip_limit": 2.0,
+        "rolling_ball_radius": 50
+      },
+      "preservation_scores": {
+        "local_variance": 1.0,
+        "entropy": 1.0,
+        "high_freq_power": 1.0,
+        "gradient_magnitude": 1.0,
+        "percentile_range": 1.0,
+        "gradient_reduction": 0.3603751529246866
+      },
+      "input_metrics": {
+        "local_variance": 0.017080430385003148,
+        "entropy": 7.197391652801361,
+        "high_freq_power": 0.015097881159174707,
+        "gradient_magnitude": 0.033428885774700205,
+        "dynamic_range": 0.6352941176470588,
+        "percentile_range": 0.5843137254901961,
+        "global_gradient_strength": 0.6791923249012287
+      },
+      "output_metrics": {
+        "local_variance": 0.019951965075156952,
+        "entropy": 7.5139665650271015,
+        "high_freq_power": 0.02777322909431466,
+        "gradient_magnitude": 0.04467181278372591,
+        "dynamic_range": 0.8723491701008028,
+        "percentile_range": 0.7043968581358786,
+        "global_gradient_strength": 0.434428286949675
+      }
+    }
+  ]
+}

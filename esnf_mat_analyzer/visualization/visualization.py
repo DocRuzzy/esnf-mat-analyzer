@@ -38,7 +38,10 @@ class Visualizer(VisualizerInterface):
     def create_thickness_heatmap(self, thickness_map: np.ndarray, mask: np.ndarray, 
                                 saturation_mask: Optional[np.ndarray] = None) -> Figure:
         """
-        Create a heatmap visualization of the thickness map using FFT enhancement.
+        Create a heatmap visualization of the thickness map.
+        
+        FFT enhancement is now OPTIONAL and controlled by config.fft_enhancement_enabled.
+        By default, FFT enhancement is disabled to preserve real thickness features.
         
         Args:
             thickness_map: 2D thickness map
@@ -48,10 +51,15 @@ class Visualizer(VisualizerInterface):
         Returns:
             Matplotlib Figure object
         """
-        self.logger.debug("Creating thickness heatmap with FFT enhancement")
-        
-        # Apply FFT-based enhancement to reveal thickness variations
-        enhanced_map = self._enhance_with_fft(thickness_map, mask)
+        # Apply FFT enhancement only if explicitly enabled
+        if self.config.fft_enhancement_enabled and self.config.fft_blend_ratio > 0:
+            self.logger.debug("Creating thickness heatmap with FFT enhancement")
+            enhanced_map = self._enhance_with_fft(thickness_map, mask)
+            title_suffix = "(FFT-Enhanced)"
+        else:
+            self.logger.debug("Creating thickness heatmap WITHOUT FFT enhancement (preserving all features)")
+            enhanced_map = thickness_map.copy()
+            title_suffix = ""
 
         # Mild display smoothing to improve perceived gradient without flattening data
         try:
@@ -109,7 +117,7 @@ class Visualizer(VisualizerInterface):
             )
         
         # Add title and labels
-        ax.set_title('Nanofiber Thickness Map (FFT-Enhanced)')
+        ax.set_title(f'Nanofiber Thickness Map {title_suffix}')
         ax.set_xlabel('X (pixels)')
         ax.set_ylabel('Y (pixels)')
         
@@ -126,21 +134,34 @@ class Visualizer(VisualizerInterface):
         """
         Enhance thickness map using FFT to reveal high-frequency variations.
         
+        WARNING: This method can remove real thickness features along with background.
+        Use with caution and verify results against known patterns.
+        
         This method:
         1. Applies FFT to decompose the thickness map
         2. Enhances high-frequency components (variations)
         3. Reduces low-frequency components (smooth gradients)
         4. Reconstructs the enhanced map
         
+        Parameters are controlled by config:
+        - fft_blend_ratio: How much to blend FFT result with original (0=none, 1=full)
+        - fft_sigma_divisor: Controls high-pass filter width (larger=gentler)
+        - fft_amplification: Amplification of high frequencies
+        
         Args:
             thickness_map: Original thickness map
             mask: Region of interest mask
             
         Returns:
-            FFT-enhanced thickness map
+            FFT-enhanced thickness map (blended with original per config)
         """
         # Create a copy to work with
         enhanced = thickness_map.copy().astype(np.float32)
+        
+        # Get config parameters with safe defaults
+        blend_ratio = getattr(self.config, 'fft_blend_ratio', 0.85)
+        sigma_divisor = getattr(self.config, 'fft_sigma_divisor', 12.0)
+        amplification = getattr(self.config, 'fft_amplification', 2.0)
         
         # Only process within the masked region
         if mask is not None and np.any(mask):
@@ -158,17 +179,17 @@ class Visualizer(VisualizerInterface):
                 fft_result = np.fft.fft2(roi)
                 fft_shifted = np.fft.fftshift(fft_result)
                 
-                # Create aggressive high-pass filter to enhance variations
+                # Create high-pass filter with configurable sigma
                 h, w = roi.shape
                 cy, cx = h // 2, w // 2
                 
-                # Gaussian high-pass filter with stronger enhancement
+                # Gaussian high-pass filter - larger sigma_divisor = gentler filtering
                 y, x = np.ogrid[-cy:h-cy, -cx:w-cx]
-                # Reduced sigma for more aggressive high-pass effect
-                gaussian_hp = 1 - np.exp(-(x**2 + y**2) / (2 * (min(h, w) / 12)**2))
+                sigma = min(h, w) / sigma_divisor
+                gaussian_hp = 1 - np.exp(-(x**2 + y**2) / (2 * sigma**2))
                 
-                # Apply filter with amplification
-                fft_filtered = fft_shifted * gaussian_hp * 2.0  # 2x amplification
+                # Apply filter with configurable amplification
+                fft_filtered = fft_shifted * gaussian_hp * amplification
                 
                 # Inverse FFT
                 fft_ishift = np.fft.ifftshift(fft_filtered)
@@ -179,13 +200,13 @@ class Visualizer(VisualizerInterface):
                 roi_enhanced_norm = (roi_enhanced - roi_enhanced.min()) / (roi_enhanced.max() - roi_enhanced.min() + 1e-8)
                 roi_enhanced_norm = roi_enhanced_norm * (roi_max - roi_min) + roi_min
                 
-                # Blend with original (85% enhanced, 15% original for more variation)
-                roi_blended = 0.85 * roi_enhanced_norm + 0.15 * roi
+                # Blend with original using configurable ratio
+                roi_blended = blend_ratio * roi_enhanced_norm + (1 - blend_ratio) * roi
                 
                 # Replace in full map
                 enhanced[y_min:y_max+1, x_min:x_max+1] = roi_blended
                 
-                self.logger.info("Applied aggressive FFT-based enhancement for more color variation")
+                self.logger.info(f"Applied FFT enhancement (blend={blend_ratio:.2f}, sigma_div={sigma_divisor:.1f}, amp={amplification:.1f})")
         
         return enhanced
     

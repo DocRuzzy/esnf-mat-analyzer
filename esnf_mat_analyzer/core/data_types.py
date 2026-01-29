@@ -230,6 +230,24 @@ class VisualizationConfig:
     auto_range_heatmap: bool = True
     """Whether to automatically adjust heatmap color range based on data percentiles."""
 
+    # FFT Enhancement Parameters
+    fft_enhancement_enabled: bool = False
+    """Whether to apply FFT-based enhancement to thickness heatmaps.
+    WARNING: FFT enhancement can remove real thickness features. 
+    Recommend keeping disabled (False) unless specifically needed for background removal."""
+
+    fft_blend_ratio: float = 0.0
+    """Blend ratio for FFT enhancement (0.0 = no enhancement, 1.0 = full enhancement).
+    Values above 0.5 may remove real thickness variations. Default 0.0 preserves all features."""
+
+    fft_sigma_divisor: float = 12.0
+    """Divisor for FFT high-pass filter sigma (sigma = min(h,w) / divisor).
+    Smaller values = more aggressive filtering (removes more features).
+    Larger values = gentler filtering (preserves more features). Default 12.0."""
+
+    fft_amplification: float = 2.0
+    """Amplification factor for FFT-enhanced frequencies. Default 2.0."""
+
     radial_avg_line_color: str = "blue"
     """Color for the average line in radial profiles."""
 
