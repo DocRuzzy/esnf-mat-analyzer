@@ -1,27 +1,62 @@
 """
-Three-Region Detector for ESNF Mat Analyzer.
+Four-Region Detector for ESNF Mat Analyzer.
 
-Identifies and segments three distinct regions in electrospun nanofiber images:
-1. Background - The collection surface outside deposition area (reference black level)
-2. Gel Region - The dark perimeter around mat (wet polymer, darker than background)
+Identifies and segments four distinct regions in electrospun nanofiber images:
+1. Background - The collection surface outside deposition area (TRUE black reference)
+2. Gel Region - The dark perimeter around mat (wet polymer, DARKER than background)
 3. Mat Region - The deposited nanofiber material (bright region)
+4. Ruler Region - Scale bar/ruler at edge of image (exclude from all analysis)
 
-This replaces simple Otsu thresholding with multi-threshold segmentation
-that properly handles the gel boundary as a sub-background region.
+CRITICAL: The gel region is DARKER than the true background because wet polymer
+absorbs light. The true background reference must come from the collection surface
+OUTSIDE the gel ring, not from the gel itself.
 
 Author: ESNF Mat Analyzer Team
 """
 
 import numpy as np
 import cv2
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, Optional, Dict, List, Any
 import logging
 
 
 @dataclass
+class FourRegionDetectionResult:
+    """Result from four-region detection."""
+    
+    # Binary masks for each region
+    background_mask: np.ndarray  # True where TRUE background (collection surface outside gel)
+    gel_mask: np.ndarray  # True in gel region (dark perimeter, DARKER than background)
+    mat_mask: np.ndarray  # True where nanofiber mat exists
+    ruler_mask: np.ndarray  # True where ruler/scale bar detected
+    
+    # Contours
+    mat_contour: Optional[np.ndarray] = None  # Outer boundary of mat
+    gel_contour: Optional[np.ndarray] = None  # Outer boundary of gel (if detected)
+    
+    # Reference intensity levels (CRITICAL for proper calibration)
+    background_intensity: float = 0.0  # Mean intensity of TRUE background (outside gel)
+    gel_intensity: float = 0.0  # Mean intensity of gel region (should be < background)
+    mat_intensity_range: Tuple[float, float] = (0.0, 255.0)  # Min/max in mat
+    
+    # Detection confidence
+    gel_detected: bool = False  # Whether distinct gel region was found
+    ruler_detected: bool = False  # Whether ruler region was found
+    quality_score: float = 0.0  # Overall detection quality (0-1)
+    
+    # Saturation info
+    saturation_mask: Optional[np.ndarray] = None
+    saturation_pct: float = 0.0  # Percentage of mat that is saturated
+    
+    # Analysis mask (mat region only, excluding gel and ruler)
+    analysis_mask: Optional[np.ndarray] = None
+
+
+# Keep legacy class for backward compatibility
+@dataclass
 class RegionDetectionResult:
-    """Result from three-region detection."""
+    """Result from three-region detection (legacy compatibility)."""
     
     # Binary masks for each region
     background_mask: np.ndarray  # True where background (outside deposition)
@@ -46,18 +81,537 @@ class RegionDetectionResult:
     saturation_pct: float = 0.0  # Percentage of mat that is saturated
 
 
+class FourRegionDetector:
+    """
+    Detector for identifying background, gel, mat, and ruler regions.
+    
+    CRITICAL INSIGHT: The gel region (wet polymer perimeter) is DARKER than
+    the true background. The background reference for calibration must come
+    from the collection surface OUTSIDE the gel ring.
+    
+    Detection Strategy (order matters):
+    1. Detect ruler region first (typically at image edges with high contrast ticks)
+    2. Find the bright mat region (standard Otsu on non-ruler area)
+    3. Detect gel as the dark ring immediately around mat
+    4. Background is everything else outside gel (true reference)
+    """
+    
+    def __init__(
+        self,
+        mat_threshold_method: str = "otsu",
+        gel_detection_enabled: bool = True,
+        ruler_detection_enabled: bool = True,
+        saturation_threshold: int = 254,
+        min_mat_area_ratio: float = 0.05,
+        max_mat_area_ratio: float = 0.8,
+        ruler_edge_margin: int = 50,  # Pixels from edge to search for ruler
+    ):
+        """
+        Initialize the four-region detector.
+        
+        Args:
+            mat_threshold_method: Method for mat detection ("otsu", "adaptive", "percentile")
+            gel_detection_enabled: Whether to attempt gel region detection
+            ruler_detection_enabled: Whether to detect and exclude ruler regions
+            saturation_threshold: Intensity above which pixels are considered saturated
+            min_mat_area_ratio: Minimum mat area as fraction of image
+            max_mat_area_ratio: Maximum mat area as fraction of image
+            ruler_edge_margin: Pixels from edge to search for ruler
+        """
+        self.mat_threshold_method = mat_threshold_method
+        self.gel_detection_enabled = gel_detection_enabled
+        self.ruler_detection_enabled = ruler_detection_enabled
+        self.saturation_threshold = saturation_threshold
+        self.min_mat_area_ratio = min_mat_area_ratio
+        self.max_mat_area_ratio = max_mat_area_ratio
+        self.ruler_edge_margin = ruler_edge_margin
+        self.logger = logging.getLogger(__name__)
+    
+    def detect(
+        self,
+        image: np.ndarray,
+        roi_mask: Optional[np.ndarray] = None,
+        ruler_mask: Optional[np.ndarray] = None
+    ) -> FourRegionDetectionResult:
+        """
+        Detect four regions in the image.
+        
+        Args:
+            image: Grayscale input image (0-255)
+            roi_mask: Optional user-defined ROI to restrict detection
+            ruler_mask: Optional pre-computed ruler mask (from RulerDetector)
+            
+        Returns:
+            FourRegionDetectionResult with masks and metadata
+        """
+        # Ensure grayscale
+        if len(image.shape) > 2:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+        
+        h, w = gray.shape
+        
+        # Apply ROI if provided
+        if roi_mask is not None:
+            analysis_mask = roi_mask.astype(bool)
+        else:
+            analysis_mask = np.ones((h, w), dtype=bool)
+        
+        # Step 1: Detect/use ruler mask
+        if ruler_mask is not None:
+            detected_ruler_mask = ruler_mask.astype(bool)
+            ruler_detected = np.any(detected_ruler_mask)
+        elif self.ruler_detection_enabled:
+            detected_ruler_mask = self._detect_ruler_region(gray)
+            ruler_detected = np.any(detected_ruler_mask)
+        else:
+            detected_ruler_mask = np.zeros((h, w), dtype=bool)
+            ruler_detected = False
+        
+        # Exclude ruler from analysis
+        analysis_mask = analysis_mask & ~detected_ruler_mask
+        
+        # Step 2: Detect mat region (bright area)
+        mat_mask, mat_contour = self._detect_mat_region(gray, analysis_mask)
+        
+        # Step 3: Detect gel region (dark ring around mat, DARKER than background)
+        if self.gel_detection_enabled:
+            gel_mask, gel_contour, gel_detected = self._detect_gel_region_improved(
+                gray, mat_mask, analysis_mask
+            )
+        else:
+            gel_mask = np.zeros((h, w), dtype=bool)
+            gel_contour = None
+            gel_detected = False
+        
+        # Step 4: TRUE background is everything outside mat AND gel (and ruler)
+        background_mask = analysis_mask & ~mat_mask & ~gel_mask & ~detected_ruler_mask
+        
+        # Ensure we have some background
+        if np.sum(background_mask) < 100:
+            self.logger.warning("Very limited true background detected")
+            # Fall back to areas far from mat
+            background_mask = self._detect_background_far_from_mat(
+                gray, mat_mask, gel_mask, detected_ruler_mask, analysis_mask
+            )
+        
+        # Calculate reference intensities
+        background_intensity = self._safe_mean(gray, background_mask)
+        gel_intensity = self._safe_mean(gray, gel_mask) if gel_detected else 0.0
+        
+        mat_values = gray[mat_mask]
+        mat_intensity_range = (float(mat_values.min()), float(mat_values.max())) if len(mat_values) > 0 else (0.0, 255.0)
+        
+        # CRITICAL CHECK: Verify gel is darker than background
+        if gel_detected and gel_intensity >= background_intensity:
+            self.logger.warning(
+                f"Gel intensity ({gel_intensity:.1f}) >= background ({background_intensity:.1f}). "
+                "This suggests incorrect region detection. Gel should be DARKER than background."
+            )
+        
+        # Detect saturation
+        saturation_mask = (gray >= self.saturation_threshold) & mat_mask
+        saturation_pct = 100 * np.sum(saturation_mask) / max(np.sum(mat_mask), 1)
+        
+        # Create analysis mask (mat only, for thickness analysis)
+        final_analysis_mask = mat_mask.copy()
+        
+        # Calculate quality score
+        quality_score = self._calculate_quality_score(
+            gray, mat_mask, background_mask, gel_mask, gel_detected, 
+            background_intensity, gel_intensity
+        )
+        
+        self.logger.info(
+            f"Four-region detection: mat={100*np.mean(mat_mask):.1f}%, "
+            f"background={100*np.mean(background_mask):.1f}%, "
+            f"gel={'detected' if gel_detected else 'not detected'}, "
+            f"ruler={'detected' if ruler_detected else 'not detected'}, "
+            f"saturation={saturation_pct:.1f}%"
+        )
+        self.logger.info(
+            f"Intensity levels: background={background_intensity:.1f}, "
+            f"gel={gel_intensity:.1f}, mat={mat_intensity_range}"
+        )
+        
+        return FourRegionDetectionResult(
+            background_mask=background_mask.astype(np.uint8),
+            gel_mask=gel_mask.astype(np.uint8),
+            mat_mask=mat_mask.astype(np.uint8),
+            ruler_mask=detected_ruler_mask.astype(np.uint8),
+            mat_contour=mat_contour,
+            gel_contour=gel_contour,
+            background_intensity=background_intensity,
+            gel_intensity=gel_intensity,
+            mat_intensity_range=mat_intensity_range,
+            gel_detected=gel_detected,
+            ruler_detected=ruler_detected,
+            quality_score=quality_score,
+            saturation_mask=saturation_mask.astype(np.uint8),
+            saturation_pct=float(saturation_pct),
+            analysis_mask=final_analysis_mask.astype(np.uint8),
+        )
+    
+    def _detect_ruler_region(self, gray: np.ndarray) -> np.ndarray:
+        """
+        Detect ruler/scale bar region at image edges.
+        
+        Rulers typically have high-contrast tick marks and appear at edges.
+        """
+        h, w = gray.shape
+        ruler_mask = np.zeros((h, w), dtype=bool)
+        
+        margin = self.ruler_edge_margin
+        
+        # Check each edge for ruler-like patterns
+        edges = [
+            ('bottom', gray[-margin:, :], (h - margin, 0)),
+            ('top', gray[:margin, :], (0, 0)),
+            ('left', gray[:, :margin], (0, 0)),
+            ('right', gray[:, -margin:], (0, w - margin)),
+        ]
+        
+        for edge_name, edge_region, offset in edges:
+            if self._is_ruler_region(edge_region):
+                y_off, x_off = offset
+                if edge_name == 'bottom':
+                    ruler_mask[-margin:, :] = True
+                elif edge_name == 'top':
+                    ruler_mask[:margin, :] = True
+                elif edge_name == 'left':
+                    ruler_mask[:, :margin] = True
+                elif edge_name == 'right':
+                    ruler_mask[:, -margin:] = True
+                self.logger.info(f"Detected ruler at {edge_name} edge")
+        
+        return ruler_mask
+    
+    def _is_ruler_region(self, region: np.ndarray) -> bool:
+        """Check if a region contains ruler-like patterns (high contrast, regular ticks)."""
+        if region.size == 0:
+            return False
+        
+        # Rulers have high local contrast (bright ticks on dark background or vice versa)
+        local_std = np.std(region)
+        
+        # Look for high contrast (std > 40 typically indicates tick marks)
+        if local_std > 40:
+            return True
+        
+        # Also check for very bright or very dark uniform regions (white/black ruler background)
+        mean_intensity = np.mean(region)
+        if mean_intensity > 220 or mean_intensity < 35:
+            # Check if there's internal structure (ticks)
+            if local_std > 20:
+                return True
+        
+        return False
+    
+    def _detect_mat_region(
+        self,
+        gray: np.ndarray,
+        analysis_mask: np.ndarray
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """Detect the bright mat region using thresholding."""
+        h, w = gray.shape
+        
+        # Get intensity values within analysis mask
+        masked_values = gray[analysis_mask]
+        
+        if len(masked_values) == 0:
+            return np.zeros((h, w), dtype=bool), None
+        
+        if self.mat_threshold_method == "otsu":
+            # Standard Otsu thresholding
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif self.mat_threshold_method == "adaptive":
+            # Adaptive thresholding
+            binary = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                cv2.THRESH_BINARY, 51, -10
+            )
+        else:  # percentile
+            # Use percentile-based threshold
+            threshold = np.percentile(masked_values, 60)
+            binary = (gray > threshold).astype(np.uint8) * 255
+        
+        # Apply analysis mask
+        binary = np.bitwise_and(binary.astype(np.uint8), (analysis_mask.astype(np.uint8) * 255))
+        
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            self.logger.warning("No mat contours found")
+            return np.zeros((h, w), dtype=bool), None
+        
+        # Find the largest contour within area constraints
+        image_area = h * w
+        valid_contours = [
+            c for c in contours
+            if self.min_mat_area_ratio * image_area <= cv2.contourArea(c) <= self.max_mat_area_ratio * image_area
+        ]
+        
+        if not valid_contours:
+            # Fall back to largest contour
+            valid_contours = [max(contours, key=cv2.contourArea)]
+        
+        largest_contour = max(valid_contours, key=cv2.contourArea)
+        
+        # Create mask from contour
+        mat_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(mat_mask, [largest_contour], -1, 1, thickness=cv2.FILLED)
+        
+        return mat_mask.astype(bool), largest_contour
+    
+    def _detect_gel_region_improved(
+        self,
+        gray: np.ndarray,
+        mat_mask: np.ndarray,
+        analysis_mask: np.ndarray
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], bool]:
+        """
+        Detect gel region - the dark ring around mat that is DARKER than background.
+        
+        Strategy:
+        1. Dilate mat to get search region
+        2. In the ring around mat, find pixels darker than the outer background
+        3. The gel is the dark ring, background is everything else outside
+        """
+        h, w = gray.shape
+        
+        # Create search ring around mat
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))
+        mat_dilated = cv2.dilate(mat_mask.astype(np.uint8), dilate_kernel).astype(bool)
+        
+        # Search region is the ring around mat (dilated - original mat)
+        ring_region = mat_dilated & ~mat_mask & analysis_mask
+        
+        if np.sum(ring_region) < 100:
+            return np.zeros((h, w), dtype=bool), None, False
+        
+        # Get intensity of the outer background (far from mat)
+        outer_background = analysis_mask & ~mat_dilated
+        
+        # Exclude edges which might have artifacts
+        edge_margin = min(h, w) // 15
+        edge_mask = np.ones((h, w), dtype=bool)
+        edge_mask[:edge_margin, :] = False
+        edge_mask[-edge_margin:, :] = False
+        edge_mask[:, :edge_margin] = False
+        edge_mask[:, -edge_margin:] = False
+        outer_background = outer_background & edge_mask
+        
+        if np.sum(outer_background) < 100:
+            # Not enough outer background, use percentile-based approach
+            self.logger.info("Limited outer background, using percentile-based gel detection")
+            outer_bg_intensity = np.percentile(gray[analysis_mask & ~mat_mask], 70)
+        else:
+            outer_bg_intensity = np.mean(gray[outer_background])
+        
+        # Gel is DARKER than outer background
+        # Threshold: pixels significantly darker than outer background
+        gel_threshold = outer_bg_intensity * 0.75  # 75% of background brightness
+        
+        # Find dark pixels in the ring region
+        potential_gel = ring_region & (gray < gel_threshold)
+        
+        # Also require gel to be darker than a minimum (not just noise)
+        min_dark_threshold = outer_bg_intensity * 0.5
+        potential_gel = potential_gel & (gray < outer_bg_intensity * 0.85)
+        
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        gel_cleaned = cv2.morphologyEx(potential_gel.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+        gel_cleaned = cv2.morphologyEx(gel_cleaned, cv2.MORPH_OPEN, kernel)
+        
+        # Check if we found a significant gel region
+        gel_area = np.sum(gel_cleaned > 0)
+        mat_area = np.sum(mat_mask)
+        
+        if gel_area < 0.01 * mat_area:
+            self.logger.info(f"Gel area ({gel_area}) too small relative to mat ({mat_area})")
+            return np.zeros((h, w), dtype=bool), None, False
+        
+        # Find gel contour
+        contours, _ = cv2.findContours(
+            gel_cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        
+        gel_contour = max(contours, key=cv2.contourArea) if contours else None
+        
+        # Verify: gel intensity should be darker than outer background
+        gel_intensity = np.mean(gray[gel_cleaned > 0]) if np.any(gel_cleaned) else 0
+        if gel_intensity >= outer_bg_intensity:
+            self.logger.warning(
+                f"Detected 'gel' ({gel_intensity:.1f}) is not darker than background ({outer_bg_intensity:.1f}). "
+                "Rejecting gel detection."
+            )
+            return np.zeros((h, w), dtype=bool), None, False
+        
+        self.logger.info(
+            f"Detected gel region: {gel_area} pixels, intensity={gel_intensity:.1f} "
+            f"(background={outer_bg_intensity:.1f})"
+        )
+        
+        return gel_cleaned.astype(bool), gel_contour, True
+    
+    def _detect_background_far_from_mat(
+        self,
+        gray: np.ndarray,
+        mat_mask: np.ndarray,
+        gel_mask: np.ndarray,
+        ruler_mask: np.ndarray,
+        analysis_mask: np.ndarray
+    ) -> np.ndarray:
+        """Find background region far from mat when standard detection fails."""
+        h, w = gray.shape
+        
+        # Dilate mat significantly
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (101, 101))
+        mat_dilated = cv2.dilate(mat_mask.astype(np.uint8), dilate_kernel).astype(bool)
+        
+        # Background is far from mat, not gel, not ruler
+        background = analysis_mask & ~mat_dilated & ~gel_mask & ~ruler_mask
+        
+        # Exclude edges
+        edge_margin = min(h, w) // 10
+        edge_mask = np.ones((h, w), dtype=bool)
+        edge_mask[:edge_margin, :] = False
+        edge_mask[-edge_margin:, :] = False
+        edge_mask[:, :edge_margin] = False
+        edge_mask[:, -edge_margin:] = False
+        
+        background = background & edge_mask
+        
+        return background
+    
+    def _safe_mean(self, image: np.ndarray, mask: np.ndarray) -> float:
+        """Calculate mean of image within mask, safely handling empty masks."""
+        if np.sum(mask) == 0:
+            return 0.0
+        return float(np.mean(image[mask.astype(bool)]))
+    
+    def _calculate_quality_score(
+        self,
+        gray: np.ndarray,
+        mat_mask: np.ndarray,
+        background_mask: np.ndarray,
+        gel_mask: np.ndarray,
+        gel_detected: bool,
+        background_intensity: float,
+        gel_intensity: float
+    ) -> float:
+        """Calculate detection quality score (0-1)."""
+        score = 0.0
+        h, w = gray.shape
+        total_pixels = h * w
+        
+        mat_ratio = np.sum(mat_mask) / total_pixels
+        bg_ratio = np.sum(background_mask) / total_pixels
+        
+        # Mat should be reasonable size
+        if 0.1 <= mat_ratio <= 0.6:
+            score += 0.2
+        elif 0.05 <= mat_ratio <= 0.8:
+            score += 0.1
+        
+        # Background should exist
+        if bg_ratio >= 0.1:
+            score += 0.2
+        elif bg_ratio >= 0.05:
+            score += 0.1
+        
+        # Check intensity ordering: gel < background < mat
+        mat_intensity = self._safe_mean(gray, mat_mask)
+        
+        if mat_intensity > background_intensity * 1.2:
+            score += 0.2
+        
+        if gel_detected:
+            # CRITICAL: Gel should be darker than background
+            if gel_intensity < background_intensity * 0.9:
+                score += 0.3  # High score for correct ordering
+            else:
+                score += 0.0  # No credit if ordering is wrong
+        else:
+            score += 0.15  # Partial credit if gel not expected
+        
+        # Bonus for clear separation
+        if gel_detected and gel_intensity < background_intensity * 0.7:
+            score += 0.1
+        
+        return min(score, 1.0)
+    
+    def visualize_regions(
+        self,
+        image: np.ndarray,
+        result: FourRegionDetectionResult,
+        alpha: float = 0.4
+    ) -> np.ndarray:
+        """
+        Create visualization overlay showing detected four regions.
+        
+        Args:
+            image: Original grayscale image
+            result: Detection result
+            alpha: Transparency of overlay
+            
+        Returns:
+            Color image with region overlays
+        """
+        # Convert to color
+        if len(image.shape) == 2:
+            vis = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        else:
+            vis = image.copy()
+        
+        # Create color overlay
+        overlay = vis.copy()
+        
+        # Background: blue (TRUE background outside gel)
+        overlay[result.background_mask.astype(bool)] = [255, 150, 100]  # Light blue
+        
+        # Gel: dark purple (darker than background)
+        if result.gel_detected:
+            overlay[result.gel_mask.astype(bool)] = [150, 50, 100]  # Dark purple
+        
+        # Mat: green
+        overlay[result.mat_mask.astype(bool)] = [100, 255, 100]  # Light green
+        
+        # Ruler: gray
+        if result.ruler_detected:
+            overlay[result.ruler_mask.astype(bool)] = [128, 128, 128]  # Gray
+        
+        # Saturation: bright red warning
+        if result.saturation_mask is not None:
+            overlay[result.saturation_mask.astype(bool)] = [0, 0, 255]  # Bright red
+        
+        # Blend
+        vis = cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
+        
+        # Draw contours
+        if result.mat_contour is not None:
+            cv2.drawContours(vis, [result.mat_contour], -1, (0, 255, 0), 2)
+        
+        if result.gel_contour is not None:
+            cv2.drawContours(vis, [result.gel_contour], -1, (150, 50, 100), 2)
+        
+        return vis
+
+
 class ThreeRegionDetector:
     """
-    Detector for identifying background, gel, and mat regions in nanofiber images.
+    Legacy three-region detector for backward compatibility.
     
-    The key insight is that the gel region (wet polymer perimeter) is DARKER
-    than the background, not brighter. This requires multi-threshold segmentation
-    rather than simple binary thresholding.
-    
-    Detection Strategy:
-    1. Find the bright mat region (standard approach)
-    2. Identify background from regions far from mat
-    3. Detect gel as the dark ring between background and mat
+    For new code, use FourRegionDetector which properly handles ruler exclusion
+    and ensures background reference comes from outside the gel ring.
     """
     
     def __init__(
@@ -68,16 +622,6 @@ class ThreeRegionDetector:
         min_mat_area_ratio: float = 0.05,
         max_mat_area_ratio: float = 0.8,
     ):
-        """
-        Initialize the three-region detector.
-        
-        Args:
-            mat_threshold_method: Method for mat detection ("otsu", "adaptive", "percentile")
-            gel_detection_enabled: Whether to attempt gel region detection
-            saturation_threshold: Intensity above which pixels are considered saturated
-            min_mat_area_ratio: Minimum mat area as fraction of image
-            max_mat_area_ratio: Maximum mat area as fraction of image
-        """
         self.mat_threshold_method = mat_threshold_method
         self.gel_detection_enabled = gel_detection_enabled
         self.saturation_threshold = saturation_threshold
@@ -91,11 +635,11 @@ class ThreeRegionDetector:
         roi_mask: Optional[np.ndarray] = None
     ) -> RegionDetectionResult:
         """
-        Detect three regions in the image.
+        Detect three regions: background, gel, mat.
         
         Args:
-            image: Grayscale input image (0-255)
-            roi_mask: Optional user-defined ROI to restrict detection
+            image: Grayscale input image
+            roi_mask: Optional ROI mask
             
         Returns:
             RegionDetectionResult with masks and metadata

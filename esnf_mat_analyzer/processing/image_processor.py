@@ -277,7 +277,8 @@ class ImageProcessor(IImageProcessor):
         return leveled_image
 
     def apply_background_correction_with_exclusion(self, image: np.ndarray, 
-                                                 exclusion_mask: np.ndarray = None) -> np.ndarray:
+                                                 exclusion_mask: np.ndarray = None,
+                                                 use_four_region_detection: bool = True) -> np.ndarray:
         """
         Apply background correction to full image while excluding specified regions.
         
@@ -288,6 +289,10 @@ class ImageProcessor(IImageProcessor):
             image: Input grayscale image
             exclusion_mask: Boolean mask where True indicates pixels to exclude 
                           from background correction (e.g., rulers)
+            use_four_region_detection: If True, use intelligent FourRegionDetector
+                          to properly identify true background (outside gel ring).
+                          This ensures gel (darker than background) is not used
+                          for background reference.
         
         Returns:
             Background-corrected image
@@ -313,12 +318,30 @@ class ImageProcessor(IImageProcessor):
             # Fallback for backward compatibility
             background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
 
-        # Apply the complete 4-step scientific workflow with exclusion awareness
-        results = self.bg_processor.complete_uniformity_analysis_with_exclusion(
-            image,
-            background_method=background_method,
-            exclusion_mask=exclusion_mask,
-            polynomial_order=getattr(self.config, 'polynomial_order', 2)
-        )
+        # Use four-region detection for proper background identification
+        if use_four_region_detection:
+            self.logger.info("Using four-region detection for background correction")
+            results = self.bg_processor.complete_uniformity_analysis_with_four_regions(
+                image,
+                background_method=background_method,
+                polynomial_order=getattr(self.config, 'polynomial_order', 2),
+                exclusion_mask=exclusion_mask
+            )
+            
+            # Log calibration info for downstream use
+            if 'calibration' in results:
+                cal = results['calibration']
+                self.logger.info(
+                    f"Calibration references: background={cal['black_reference']:.1f}, "
+                    f"gel={cal['gel_intensity']:.1f}, max_mat={cal['white_reference']:.1f}"
+                )
+        else:
+            # Legacy: Apply the complete 4-step scientific workflow with exclusion awareness
+            results = self.bg_processor.complete_uniformity_analysis_with_exclusion(
+                image,
+                background_method=background_method,
+                exclusion_mask=exclusion_mask,
+                polynomial_order=getattr(self.config, 'polynomial_order', 2)
+            )
         
         return results['corrected_image']

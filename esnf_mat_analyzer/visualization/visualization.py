@@ -12,7 +12,7 @@ and uniformity metrics, including heatmaps, radial profiles, and metric plots.
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, PowerNorm
 from matplotlib.figure import Figure
 from typing import Tuple, Dict, Optional, Any, List
 import logging
@@ -42,6 +42,9 @@ class Visualizer(VisualizerInterface):
         
         FFT enhancement is now OPTIONAL and controlled by config.fft_enhancement_enabled.
         By default, FFT enhancement is disabled to preserve real thickness features.
+        
+        For data with low coefficient of variation (CV < 15%), the colormap range
+        is stretched to the full min-max range to make subtle variations visible.
         
         Args:
             thickness_map: 2D thickness map
@@ -76,28 +79,53 @@ class Visualizer(VisualizerInterface):
         # Use specified colormap
         cmap = plt.get_cmap(self.config.colormap)
         
-        # Create heatmap
-        # Calculate reasonable color limits based on the actual data
+        # Create heatmap - calculate color limits based on data
+        vmin, vmax = None, None
+        cv_value = None
+        contrast_enhanced = False
+        norm = None  # Custom normalization for stretching high values
+        
         if self.config.auto_range_heatmap:
             valid_data = masked_thickness.compressed()  # Get non-masked values
             if len(valid_data) > 0:
-                # Use configurable percentiles to avoid extreme outliers affecting the color scale
-                # Widen the percentile window slightly for smoother color gradients
-                min_percentile, max_percentile = (max(0, self.config.heatmap_percentile_range[0]-1),
-                                                  min(100, self.config.heatmap_percentile_range[1]+1))
-                vmin = np.percentile(valid_data, min_percentile)
-                vmax = np.percentile(valid_data, max_percentile)
+                data_min = float(np.min(valid_data))
+                data_max = float(np.max(valid_data))
+                data_mean = float(np.mean(valid_data))
+                data_std = float(np.std(valid_data))
+                data_range = data_max - data_min
+                
+                # Calculate coefficient of variation (CV)
+                cv_value = (data_std / data_mean * 100) if data_mean > 0 else 0
                 
                 # Log data statistics
-                self.logger.info(f"FFT-enhanced thickness data - Min: {np.min(valid_data):.3f}, Max: {np.max(valid_data):.3f}, Mean: {np.mean(valid_data):.3f}")
-                self.logger.info(f"Color range (percentiles {min_percentile}-{max_percentile}): [{vmin:.3f}, {vmax:.3f}]")
-            else:
-                vmin, vmax = None, None
-        else:
-            vmin, vmax = None, None
+                self.logger.info(f"Thickness data stats - Min: {data_min:.3f}, Max: {data_max:.3f}, "
+                               f"Mean: {data_mean:.3f}, Std: {data_std:.3f}, CV: {cv_value:.2f}%")
+                
+                # For low-variation data (CV < 15%), use full min-max range to show subtle variations
+                if cv_value < 15.0 and data_range > 0:
+                    vmin = data_min
+                    vmax = data_max
+                    contrast_enhanced = True
+                    self.logger.info(f"Low CV ({cv_value:.2f}%) - using full data range [{vmin:.3f}, {vmax:.3f}]")
+                else:
+                    # Use configurable percentiles to avoid extreme outliers
+                    min_percentile, max_percentile = (max(0, self.config.heatmap_percentile_range[0]-1),
+                                                      min(100, self.config.heatmap_percentile_range[1]+1))
+                    vmin = np.percentile(valid_data, min_percentile)
+                    vmax = np.percentile(valid_data, max_percentile)
+                    self.logger.info(f"Color range (percentiles {min_percentile}-{max_percentile}): [{vmin:.3f}, {vmax:.3f}]")
+                
+                # Use power-law normalization to stretch high thickness values and compress low values
+                # gamma < 1 allocates more color range to high values (bright mat region)
+                # gamma = 0.2 gives ~90% of colormap to upper half, 10% to lower half
+                gamma = self.config.heatmap_gamma  # Configurable via GUI (0.1-1.0)
+                if vmin is not None and vmax is not None and vmax > vmin:
+                    norm = PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+                    self.logger.info(f"Using power-law normalization (gamma={gamma:.2f}) to enhance high-value contrast")
         
         # Use bilinear interpolation for smoother visual gradients
-        im = ax.imshow(masked_thickness, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='bilinear')
+        im = ax.imshow(masked_thickness, cmap=cmap, norm=norm, vmin=vmin if norm is None else None, 
+                      vmax=vmax if norm is None else None, interpolation='bilinear')
         
         # Add colorbar
         cbar = plt.colorbar(im, ax=ax)
@@ -116,8 +144,11 @@ class Visualizer(VisualizerInterface):
                 cmap=LinearSegmentedColormap.from_list('saturated', ['red', 'red'])
             )
         
-        # Add title and labels
-        ax.set_title(f'Nanofiber Thickness Map {title_suffix}')
+        # Add title and labels - indicate if contrast was enhanced for low-variation data
+        if contrast_enhanced and cv_value is not None:
+            ax.set_title(f'Nanofiber Thickness Map {title_suffix}\n(Contrast Enhanced - CV: {cv_value:.1f}%)')
+        else:
+            ax.set_title(f'Nanofiber Thickness Map {title_suffix}')
         ax.set_xlabel('X (pixels)')
         ax.set_ylabel('Y (pixels)')
         

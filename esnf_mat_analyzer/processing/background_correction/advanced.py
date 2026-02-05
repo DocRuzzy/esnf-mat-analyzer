@@ -1137,3 +1137,108 @@ class AdvancedBackgroundProcessor:
                         max(0, min_x - expansion):min(max_x + expansion, image_shape[1])] = True
         
         return expanded
+    def complete_uniformity_analysis_with_four_regions(
+        self, 
+        image: np.ndarray,
+        background_method: str = "polynomial",
+        polynomial_order: int = 2,
+        exclusion_mask: np.ndarray = None
+    ) -> Dict:
+        """
+        Complete 4-step uniformity analysis using FourRegionDetector.
+        
+        This version uses intelligent region detection to ensure:
+        1. Background pixels come from TRUE background (outside gel ring)
+        2. Gel region (darker than background) is excluded from background modeling
+        3. Rulers are properly detected and excluded
+        
+        This fixes the issue where gel (wet polymer, darker than background)
+        was incorrectly used as background reference, leading to incorrect
+        thickness calibration.
+        
+        Args:
+            image: Input grayscale image
+            background_method: "polynomial" or "large_kernel_blur"
+            polynomial_order: Order for polynomial fitting (2 or 3)
+            exclusion_mask: Additional exclusion mask (e.g., user-specified)
+            
+        Returns:
+            Dictionary containing all results and intermediate steps
+        """
+        from esnf_mat_analyzer.processing.region_detector import FourRegionDetector
+        
+        results = {}
+        
+        # STEP 1: Intelligent four-region detection
+        self.logger.info("Step 1: Detecting four regions (background, gel, mat, ruler)...")
+        detector = FourRegionDetector()
+        
+        # Pass any user exclusion mask (will be combined with detected rulers)
+        region_result = detector.detect(image, exclusion_mask=exclusion_mask)
+        
+        # Store region masks
+        results['mat_mask'] = region_result.mat_mask.astype(bool)
+        results['gel_mask'] = region_result.gel_mask.astype(bool)
+        results['background_mask'] = region_result.background_mask.astype(bool)  # TRUE background
+        results['ruler_mask'] = region_result.ruler_mask.astype(bool)
+        results['gel_detected'] = region_result.gel_detected
+        results['ruler_detected'] = region_result.ruler_detected
+        results['region_quality_score'] = region_result.quality_score
+        
+        # Log region statistics
+        h, w = image.shape
+        total_pixels = h * w
+        self.logger.info(f"Region detection (quality={region_result.quality_score:.2f}):")
+        self.logger.info(f"  TRUE Background: {100*np.sum(results['background_mask'])/total_pixels:.1f}%")
+        self.logger.info(f"  Gel: {100*np.sum(results['gel_mask'])/total_pixels:.1f}% "
+                        f"({'detected' if region_result.gel_detected else 'not detected'})")
+        self.logger.info(f"  Mat: {100*np.sum(results['mat_mask'])/total_pixels:.1f}%")
+        self.logger.info(f"  Ruler: {100*np.sum(results['ruler_mask'])/total_pixels:.1f}% "
+                        f"({'detected' if region_result.ruler_detected else 'not detected'})")
+        
+        # Verify intensity ordering
+        bg_intensity = region_result.background_intensity
+        gel_intensity = region_result.gel_intensity
+        results['background_reference_intensity'] = bg_intensity
+        results['gel_intensity'] = gel_intensity
+        
+        if region_result.gel_detected and gel_intensity >= bg_intensity:
+            self.logger.warning(
+                f"Intensity ordering issue: gel ({gel_intensity:.1f}) should be "
+                f"darker than background ({bg_intensity:.1f})"
+            )
+        
+        # STEP 2: Model illumination using ONLY true background pixels
+        self.logger.info(f"Step 2: Modeling illumination from TRUE background using {background_method}...")
+        if background_method == "polynomial":
+            estimated_background = self._step2a_polynomial_surface_fitting(
+                image, results['background_mask'], polynomial_order
+            )
+        else:  # large_kernel_blur
+            estimated_background = self._step2b_large_kernel_blurring(
+                image, results['background_mask']
+            )
+        results['estimated_background'] = estimated_background
+        
+        # STEP 3: Correct the Image
+        self.logger.info("Step 3: Correcting image using division...")
+        corrected_image = self._step3_correct_image(image, estimated_background)
+        results['corrected_image'] = corrected_image
+        
+        # STEP 4: Analyze Mat Uniformity
+        self.logger.info("Step 4: Analyzing mat uniformity...")
+        uniformity_metrics = self._step4_analyze_mat_uniformity(
+            corrected_image, results['mat_mask']
+        )
+        results.update(uniformity_metrics)
+        
+        # Store calibration references
+        results['calibration'] = {
+            'black_reference': bg_intensity,  # True background intensity
+            'white_reference': region_result.mat_intensity_range[1],  # Max mat intensity
+            'gel_intensity': gel_intensity,
+            'saturation_detected': region_result.saturation_pct > 0.5,
+            'saturation_pct': region_result.saturation_pct,
+        }
+        
+        return results

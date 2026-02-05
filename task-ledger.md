@@ -12,15 +12,21 @@ Auto-maintained ledger of active, blocked, and completed tasks. Updated by AI as
 
 | ID | Title | Status | Prereq | Block Reason | Notes / Next Action |
 |----|-------|--------|--------|--------------|---------------------|
-| T053 | Upgrade to four-region detection | TODO | - | - | **NEW** Add ruler as 4th region. Regions: background (collection surface), gel (dark wet ring), mat (bright deposition), ruler (scale bar). Current 3-region confuses gel with background. |
-| T054 | Fix background reference selection | TODO | T053 | - | **NEW** Background reference must come from collection surface OUTSIDE gel ring. Gel has darkest blacks (wet polymer) but is NOT the true background. |
-| T055 | Background-only gradient correction | TODO | T054 | - | **NEW** Fit illumination gradient ONLY to true background pixels, extrapolate into mat region, anchor to darkest true background level. Preserves mat thickness features. |
-| T050 | Integrate four-region detection into main pipeline | TODO | T053 | - | Use updated region_detector in analyzer, update GUI overlays |
-| T051 | Add physical calibration UI with marked point | TODO | T050 | - | Allow user to mark a point and enter known thickness in µm |
-| T052 | Add deposition parameter inputs to GUI | TODO | - | - | Optional inputs for flow rate, time, concentration for theoretical mass estimation |
 | T003 | Expose recommendation weights in GUI | TODO | T002 | - | Add sliders for (w_dyn, w_sig, w_sat) in `MainWindow`, persist via `config_manager`. Unit tests to verify persistence. |
 | T004 | Fix OpenCV cvtColor empty-source crash | IN-PROGRESS | - | Need repro images | Defensive checks added; awaiting failing image to finalize fix and tests. |
-| Task 2 | Add GUI slider for heatmap gamma | TODO | 1 | None | Expose gamma control (0.2–1.5) in Image Controls; persist to user config and use in export. |
+
+## Recently Completed (2026-01-31)
+
+| ID | Title | Status | Completion Date | Notes |
+|----|-------|--------|-----------------|-------|
+| Task 2 | Add GUI slider for heatmap gamma | DONE | 2026-01-31 | Added gamma slider (0.1-1.0) to Image Controls frame. Updates `VisualizationConfig.heatmap_gamma` which controls power-law normalization in thickness heatmaps. Lower gamma stretches high values (bright mat region). |
+| T052 | Add deposition parameter inputs to GUI | DONE | 2026-01-31 | Added Deposition Parameters frame with flow rate (mL/hr), collection time (min), concentration (wt%) inputs. Calculate button computes theoretical mass using `DepositionParameters.calculate_theoretical_mass_mg()`. |
+| T053 | Upgrade to four-region detection | DONE | 2026-01-31 | Added `FourRegionDetector` class to `region_detector.py`. Detects 4 regions: background (collection surface OUTSIDE gel), gel (dark wet ring), mat (bright deposition), ruler. Legacy `ThreeRegionDetector` preserved for backward compatibility. |
+| T054 | Fix background reference selection | DONE | 2026-01-31 | Four-region detector now ensures background reference comes from true background (outside gel ring), not from gel which is darker. Fixes incorrect thickness calibration when gel was used as background. |
+| T055 | Background-only gradient correction | DONE | 2026-01-31 | Added `complete_uniformity_analysis_with_four_regions()` to `AdvancedBackgroundProcessor` that fits illumination gradient ONLY to true background pixels. Preserves mat thickness features. |
+| T050 | Integrate four-region detection into main pipeline | DONE | 2026-01-31 | Updated `image_processor.py` to use `FourRegionDetector` via `use_four_region_detection=True` parameter. Updated GUI gel boundary analysis to use four-region detection with comparison view. |
+| T051 | Add physical calibration UI with marked point | DONE | 2026-01-31 | Added Physical Calibration frame to GUI with: known thickness input (µm), point picker (click on image), marker display toggle. Methods: `_toggle_physical_cal_ui()`, `_start_cal_point_selection()`, `_on_cal_point_click()`, `_draw_calibration_marker()`. |
+| T056 | Add power-law normalization for heatmap contrast | DONE | 2026-01-31 | Added PowerNorm with configurable gamma to `visualization.py`. gamma=0.2 gives ~90% colormap to high thickness values, ~10% to low values. Also added CV-based auto-contrast enhancement for low-variation data (CV<15%). |
 
 ## Recently Completed (2026-01-29)
 
@@ -77,6 +83,20 @@ None currently.
 After every task completion or status change, this file must be updated by the AI assistant (Requirement R-LEDGER-UPDATE). The assistant also updates `.github/copilot-instructions.md` to include this policy.
 
 ## Audit / Recent Activity
+
+- **2026-01-31 (Session 3)**: **Completed Task 2 and T052**.
+  - Task 2: Added heatmap gamma slider (0.1-1.0 range) to Image Controls. Added `heatmap_gamma` to `VisualizationConfig`. GUI slider updates label dynamically. Both show_heatmap and export_image now use the gamma setting.
+  - T052: Added Deposition Parameters frame with flow rate, collection time, concentration inputs. Calculate button uses `DepositionParameters.calculate_theoretical_mass_mg()` to estimate theoretical polymer mass.
+
+- **2026-01-31 (Session 2)**: **Completed four-region detection system (T050-T055)**. Major architecture changes:
+  - `FourRegionDetector` class in `region_detector.py` - detects background (outside gel), gel (dark wet ring), mat (bright), ruler (4 distinct regions)
+  - Background reference now comes from TRUE background (collection surface) not gel
+  - Added `complete_uniformity_analysis_with_four_regions()` to `AdvancedBackgroundProcessor`
+  - Updated `image_processor.py` to use four-region detection by default
+  - GUI gel boundary analysis now shows four-region detection with intensity histogram and comparison to legacy three-region
+  - Added Physical Calibration UI: thickness input (µm), point picker, marker display
+
+- **2026-01-31 (Session 1)**: **Thickness heatmap visualization improvements**. Added power-law normalization (PowerNorm) to stretch high thickness values and compress low values. gamma=0.2 allocates ~90% of colormap to upper half of values (bright mat region), ~10% to lower half (gel/border). Also added CV-based detection for low-variation data - when CV<15%, uses full min-max range for contrast. This addresses user feedback that thickness maps were showing uniform color (no variation) for uniformly bright mats.
 
 - **2026-01-30 (PM)**: **Critical insight: Four-region model required**. Current three-region detection confuses gel with background. Gel (wet polymer ring) is DARKER than true background but has reflections. True background is the collection surface OUTSIDE the gel ring. Added tasks T053-T055 for proper region detection and background reference fix. Created `scripts/auto_tune_detail_preservation.py` with background-only gradient fitting concept. Fixed `ruler_detector.py` dict access bug.
 

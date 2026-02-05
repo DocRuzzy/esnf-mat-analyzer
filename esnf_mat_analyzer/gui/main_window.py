@@ -363,6 +363,74 @@ class MainWindow(tk.Tk):
         )
         self.gel_analysis_button.pack(padx=5, pady=3)
 
+        # --- Physical Calibration Settings ---
+        self.physical_cal_frame = ttk.LabelFrame(self.analysis_frame, text="Physical Calibration (µm)")
+        self.physical_cal_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Enable physical calibration
+        self.physical_cal_enabled_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self.physical_cal_frame,
+            text="Enable physical thickness calibration",
+            variable=self.physical_cal_enabled_var,
+            command=self._toggle_physical_cal_ui
+        ).pack(anchor=tk.W, padx=5, pady=2)
+        
+        # Calibration input frame (disabled by default)
+        self.physical_cal_input_frame = ttk.Frame(self.physical_cal_frame)
+        self.physical_cal_input_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        # Known thickness input
+        known_thick_frame = ttk.Frame(self.physical_cal_input_frame)
+        known_thick_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(known_thick_frame, text="Known thickness (µm):").pack(side=tk.LEFT)
+        self.known_thickness_var = tk.DoubleVar(value=0.0)
+        self.known_thickness_entry = ttk.Entry(
+            known_thick_frame, textvariable=self.known_thickness_var, width=10
+        )
+        self.known_thickness_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Reference point selection  
+        ref_point_frame = ttk.Frame(self.physical_cal_input_frame)
+        ref_point_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(ref_point_frame, text="Reference point (x, y):").pack(side=tk.LEFT)
+        self.cal_point_x_var = tk.IntVar(value=0)
+        self.cal_point_y_var = tk.IntVar(value=0)
+        self.cal_x_entry = ttk.Entry(ref_point_frame, textvariable=self.cal_point_x_var, width=6)
+        self.cal_x_entry.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ref_point_frame, text=",").pack(side=tk.LEFT)
+        self.cal_y_entry = ttk.Entry(ref_point_frame, textvariable=self.cal_point_y_var, width=6)
+        self.cal_y_entry.pack(side=tk.LEFT, padx=2)
+        
+        # Pick point button
+        self.pick_cal_point_btn = ttk.Button(
+            self.physical_cal_input_frame,
+            text="📍 Pick Point on Image",
+            command=self._start_cal_point_selection
+        )
+        self.pick_cal_point_btn.pack(pady=2)
+        
+        # Show calibration point on image
+        self.show_cal_point_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self.physical_cal_input_frame,
+            text="Show calibration point marker",
+            variable=self.show_cal_point_var
+        ).pack(anchor=tk.W, pady=2)
+        
+        # Help text
+        ttk.Label(
+            self.physical_cal_frame,
+            text="Tip: Click a point with known thickness\n"
+                 "(e.g., measured by profilometry, SEM)",
+            foreground="#666666",
+            wraplength=280
+        ).pack(padx=5, pady=3)
+        
+        # Initialize state (disabled by default)
+        self._calibration_point_selection_active = False
+        self._toggle_physical_cal_ui()
+
         self.analyze_button = ttk.Button(
             self.analysis_frame, text="Analyze", command=self.analyze
         )
@@ -410,6 +478,60 @@ class MainWindow(tk.Tk):
         ttk.Label(roi_shape_frame, text="ROI Shape:").pack(side=tk.LEFT, padx=4)
         ttk.Radiobutton(roi_shape_frame, text="Rectangle", variable=self.roi_shape_var, value="rectangle").pack(side=tk.LEFT, padx=4)
         ttk.Radiobutton(roi_shape_frame, text="Circle", variable=self.roi_shape_var, value="circle").pack(side=tk.LEFT, padx=4)
+
+        # Heatmap gamma control
+        gamma_frame = ttk.Frame(self.image_controls_frame)
+        gamma_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(gamma_frame, text="Heatmap Gamma:").pack(side=tk.LEFT)
+        self.heatmap_gamma_var = tk.DoubleVar(value=0.2)
+        self.gamma_scale = ttk.Scale(
+            gamma_frame, from_=0.1, to=1.0, variable=self.heatmap_gamma_var,
+            orient=tk.HORIZONTAL, length=100
+        )
+        self.gamma_scale.pack(side=tk.LEFT, padx=5)
+        self.gamma_label = ttk.Label(gamma_frame, text="0.20")
+        self.gamma_label.pack(side=tk.LEFT)
+        self.heatmap_gamma_var.trace_add("write", self._update_gamma_label)
+        ttk.Label(self.image_controls_frame, 
+                 text="γ<1: stretch high values (bright mat)\nγ=1: linear",
+                 foreground="#666666", font=("TkDefaultFont", 8)).pack(padx=5)
+
+        # --- Deposition Parameters (T052) ---
+        self.deposition_frame = ttk.LabelFrame(self.analysis_frame, text="Deposition Parameters (Optional)")
+        self.deposition_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Flow rate
+        flow_frame = ttk.Frame(self.deposition_frame)
+        flow_frame.pack(fill=tk.X, padx=5, pady=1)
+        ttk.Label(flow_frame, text="Flow rate (mL/hr):").pack(side=tk.LEFT)
+        self.flow_rate_var = tk.DoubleVar(value=0.0)
+        ttk.Entry(flow_frame, textvariable=self.flow_rate_var, width=8).pack(side=tk.LEFT, padx=5)
+        
+        # Collection time
+        time_frame = ttk.Frame(self.deposition_frame)
+        time_frame.pack(fill=tk.X, padx=5, pady=1)
+        ttk.Label(time_frame, text="Collection time (min):").pack(side=tk.LEFT)
+        self.collection_time_var = tk.DoubleVar(value=0.0)
+        ttk.Entry(time_frame, textvariable=self.collection_time_var, width=8).pack(side=tk.LEFT, padx=5)
+        
+        # Polymer concentration
+        conc_frame = ttk.Frame(self.deposition_frame)
+        conc_frame.pack(fill=tk.X, padx=5, pady=1)
+        ttk.Label(conc_frame, text="Concentration (wt%):").pack(side=tk.LEFT)
+        self.concentration_var = tk.DoubleVar(value=0.0)
+        ttk.Entry(conc_frame, textvariable=self.concentration_var, width=8).pack(side=tk.LEFT, padx=5)
+        
+        # Theoretical mass display
+        self.theoretical_mass_label = ttk.Label(
+            self.deposition_frame, text="Theoretical mass: -- mg", foreground="#666666"
+        )
+        self.theoretical_mass_label.pack(padx=5, pady=2)
+        
+        # Calculate button
+        ttk.Button(
+            self.deposition_frame, text="Calculate Theoretical Mass",
+            command=self._calculate_theoretical_mass
+        ).pack(padx=5, pady=2)
 
         self.show_heatmap_button = ttk.Button(
             self.analysis_frame, text="Show Heatmap", command=self.show_heatmap
@@ -756,6 +878,176 @@ class MainWindow(tk.Tk):
         self.drawing_mode = "scale"
         print("Set drawing mode to 'scale'. Draw a circle to define the scale.")
 
+    def _toggle_physical_cal_ui(self):
+        """Enable/disable physical calibration input widgets."""
+        enabled = self.physical_cal_enabled_var.get()
+        state = "normal" if enabled else "disabled"
+        
+        for widget in self.physical_cal_input_frame.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for child in widget.winfo_children():
+                    if hasattr(child, 'configure'):
+                        try:
+                            child.configure(state=state)
+                        except tk.TclError:
+                            pass  # Some widgets don't support state
+            elif hasattr(widget, 'configure'):
+                try:
+                    widget.configure(state=state)
+                except tk.TclError:
+                    pass
+
+    def _start_cal_point_selection(self):
+        """Start calibration point selection mode."""
+        if not self.current_image:
+            tk.messagebox.showwarning("Warning", "Please load an image first.")
+            return
+        
+        self._calibration_point_selection_active = True
+        self.pick_cal_point_btn.configure(text="📍 Click on Image...")
+        self.canvas.configure(cursor="crosshair")
+        
+        # Bind click event
+        self._cal_point_bind_id = self.canvas.bind("<Button-1>", self._on_cal_point_click)
+        
+    def _on_cal_point_click(self, event):
+        """Handle click for calibration point selection."""
+        if not self._calibration_point_selection_active:
+            return
+        
+        # Convert canvas coordinates to image coordinates
+        img_x = int(event.x / self.scale_factor)
+        img_y = int(event.y / self.scale_factor)
+        
+        # Validate within image bounds
+        img_width, img_height = self.current_image.size
+        img_x = max(0, min(img_x, img_width - 1))
+        img_y = max(0, min(img_y, img_height - 1))
+        
+        # Update variables
+        self.cal_point_x_var.set(img_x)
+        self.cal_point_y_var.set(img_y)
+        
+        # Reset selection mode
+        self._calibration_point_selection_active = False
+        self.pick_cal_point_btn.configure(text="📍 Pick Point on Image")
+        self.canvas.configure(cursor="")
+        
+        # Unbind the click event
+        if hasattr(self, '_cal_point_bind_id'):
+            self.canvas.unbind("<Button-1>", self._cal_point_bind_id)
+        
+        # Rebind normal click handler
+        self.canvas.bind("<Button-1>", self.start_drawing)
+        
+        # Redraw to show marker
+        self._draw_calibration_marker()
+        
+        print(f"Calibration point set: ({img_x}, {img_y})")
+
+    def _draw_calibration_marker(self):
+        """Draw calibration point marker on canvas."""
+        # Remove existing marker if any
+        self.canvas.delete("cal_marker")
+        
+        if not self.show_cal_point_var.get():
+            return
+        
+        if not self.physical_cal_enabled_var.get():
+            return
+        
+        x = self.cal_point_x_var.get()
+        y = self.cal_point_y_var.get()
+        
+        if x <= 0 and y <= 0:
+            return
+        
+        # Convert to canvas coordinates
+        canvas_x = x * self.scale_factor
+        canvas_y = y * self.scale_factor
+        
+        # Draw crosshair marker
+        size = 10
+        self.canvas.create_line(
+            canvas_x - size, canvas_y, canvas_x + size, canvas_y,
+            fill="cyan", width=2, tags="cal_marker"
+        )
+        self.canvas.create_line(
+            canvas_x, canvas_y - size, canvas_x, canvas_y + size,
+            fill="cyan", width=2, tags="cal_marker"
+        )
+        self.canvas.create_oval(
+            canvas_x - size//2, canvas_y - size//2,
+            canvas_x + size//2, canvas_y + size//2,
+            outline="cyan", width=2, tags="cal_marker"
+        )
+
+    def get_physical_calibration_params(self):
+        """Get physical calibration parameters if enabled."""
+        if not self.physical_cal_enabled_var.get():
+            return None
+        
+        thickness = self.known_thickness_var.get()
+        x = self.cal_point_x_var.get()
+        y = self.cal_point_y_var.get()
+        
+        if thickness <= 0:
+            return None
+        
+        return {
+            'known_thickness_um': thickness,
+            'location': (x, y),
+            'label': 'User calibration point'
+        }
+
+    def _update_gamma_label(self, *args):
+        """Update gamma label when slider changes."""
+        try:
+            val = self.heatmap_gamma_var.get()
+            self.gamma_label.config(text=f"{val:.2f}")
+        except Exception:
+            pass
+
+    def _calculate_theoretical_mass(self):
+        """Calculate and display theoretical deposited polymer mass."""
+        try:
+            from esnf_mat_analyzer.processing.calibration import DepositionParameters
+            
+            flow_rate = self.flow_rate_var.get()
+            collection_time = self.collection_time_var.get()
+            concentration = self.concentration_var.get()
+            
+            if flow_rate <= 0 or collection_time <= 0 or concentration <= 0:
+                self.theoretical_mass_label.config(
+                    text="Theoretical mass: Enter all values > 0",
+                    foreground="#884400"
+                )
+                return
+            
+            params = DepositionParameters(
+                flow_rate_ml_per_hr=flow_rate,
+                collection_time_min=collection_time,
+                polymer_concentration_wt_pct=concentration
+            )
+            
+            mass = params.calculate_theoretical_mass_mg()
+            
+            if mass is not None:
+                self.theoretical_mass_label.config(
+                    text=f"Theoretical mass: {mass:.2f} mg",
+                    foreground="#006600"
+                )
+            else:
+                self.theoretical_mass_label.config(
+                    text="Theoretical mass: Calculation failed",
+                    foreground="#884400"
+                )
+        except Exception as e:
+            self.theoretical_mass_label.config(
+                text=f"Error: {str(e)[:30]}",
+                foreground="#880000"
+            )
+
     def calculate_scale_from_oval(self):
         if not self.oval:
             return
@@ -868,6 +1160,9 @@ class MainWindow(tk.Tk):
         # Apply saturation display setting
         vis_config.show_saturated = self.show_saturation_var.get()
         
+        # Apply heatmap gamma from GUI (Task 2)
+        vis_config.heatmap_gamma = self.heatmap_gamma_var.get()
+        
         visualizer = Visualizer(vis_config)
 
         # Create the heatmap figure
@@ -908,6 +1203,8 @@ class MainWindow(tk.Tk):
                     vis_config.fft_blend_ratio = self.fft_blend_var.get()
                     vis_config.fft_sigma_divisor = self.fft_sigma_var.get()
                     vis_config.show_saturated = self.show_saturation_var.get()
+                    # Apply heatmap gamma from GUI
+                    vis_config.heatmap_gamma = self.heatmap_gamma_var.get()
                     
                     visualizer = Visualizer(vis_config)
                     fig = visualizer.create_thickness_heatmap(
@@ -1337,14 +1634,11 @@ class MainWindow(tk.Tk):
             return
 
         try:
-            from esnf_mat_analyzer.processing.region_detector import ThreeRegionDetector
+            from esnf_mat_analyzer.processing.region_detector import FourRegionDetector, ThreeRegionDetector
             from esnf_mat_analyzer.analysis.gel_boundary_analysis import GelBoundaryAnalyzer
             
             # Convert image to grayscale numpy array
             img_array = np.array(self.current_image.convert('L'))
-            
-            # Detect three regions
-            detector = ThreeRegionDetector(gel_detection_enabled=self.detect_gel_var.get())
             
             # Get ROI if defined
             roi = self.get_roi_coordinates()
@@ -1354,40 +1648,82 @@ class MainWindow(tk.Tk):
                 roi_mask = np.zeros(img_array.shape, dtype=np.uint8)
                 roi_mask[y1:y2, x1:x2] = 1
             
-            result = detector.detect(img_array, roi_mask)
+            # Use FourRegionDetector for proper background detection
+            # This ensures gel (darker than background) is correctly identified
+            four_detector = FourRegionDetector(gel_detection_enabled=self.detect_gel_var.get())
+            four_result = four_detector.detect(img_array, roi_mask=roi_mask)
+            
+            # Also get legacy three-region result for comparison
+            three_detector = ThreeRegionDetector(gel_detection_enabled=self.detect_gel_var.get())
+            three_result = three_detector.detect(img_array, roi_mask)
             
             # Create results window
             results_window = tk.Toplevel(self)
-            results_window.title("Gel Boundary Analysis")
-            results_window.geometry("900x700")
+            results_window.title("Gel Boundary Analysis (Four-Region Detection)")
+            results_window.geometry("1100x800")
             
-            # Create matplotlib figure
-            fig = Figure(figsize=(12, 8))
+            # Create matplotlib figure with more subplots
+            fig = Figure(figsize=(14, 10))
             
-            # Subplot 1: Region visualization
-            ax1 = fig.add_subplot(2, 2, 1)
-            vis = detector.visualize_regions(img_array, result)
+            # Subplot 1: Four-region visualization
+            ax1 = fig.add_subplot(2, 3, 1)
+            vis = four_detector.visualize_regions(img_array, four_result)
             ax1.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-            ax1.set_title("Detected Regions\n(Green=Mat, Blue=Background, Red=Gel)")
+            ax1.set_title("Four-Region Detection\n(Blue=Background, Purple=Gel,\nGreen=Mat, Gray=Ruler)")
             ax1.axis('off')
             
             # Subplot 2: Original with intensity info
-            ax2 = fig.add_subplot(2, 2, 2)
+            ax2 = fig.add_subplot(2, 3, 2)
             ax2.imshow(img_array, cmap='gray')
-            ax2.set_title(f"Reference Intensities\nBackground: {result.background_intensity:.1f}, "
-                         f"Gel: {result.gel_intensity:.1f}")
+            title_lines = [
+                "Reference Intensities",
+                f"TRUE Background: {four_result.background_intensity:.1f}",
+                f"Gel: {four_result.gel_intensity:.1f}" if four_result.gel_detected else "Gel: Not detected"
+            ]
+            ax2.set_title('\n'.join(title_lines))
             ax2.axis('off')
             
+            # Subplot 3: Comparison - three-region vs four-region
+            ax3 = fig.add_subplot(2, 3, 3)
+            ax3.axis('off')
+            
+            comparison_text = f"""BACKGROUND REFERENCE COMPARISON
+{'='*45}
+
+Four-Region Detection (RECOMMENDED):
+  Background: {four_result.background_intensity:.1f}
+  Gel: {four_result.gel_intensity:.1f}
+  Ruler detected: {'Yes' if four_result.ruler_detected else 'No'}
+  
+Legacy Three-Region Detection:
+  Background: {three_result.background_intensity:.1f}
+  Gel: {three_result.gel_intensity:.1f}
+
+{'='*45}
+KEY INSIGHT: Gel is DARKER than true background
+(wet polymer absorbs light)
+
+Using gel as background reference would cause
+INCORRECT thickness calibration.
+
+Four-region detection ensures background reference
+comes from collection surface OUTSIDE gel ring.
+"""
+            ax3.text(0.05, 0.95, comparison_text, transform=ax3.transAxes,
+                    fontsize=9, fontfamily='monospace',
+                    verticalalignment='top')
+            
             # Analyze gel shape if detected
+            result = four_result  # Use four-region result
             if result.gel_detected:
                 analyzer = GelBoundaryAnalyzer()
                 metrics = analyzer.analyze_gel_shape(
                     result.gel_mask, img_array.shape[:2], result.gel_contour
                 )
                 
-                # Subplot 3: Metrics text
-                ax3 = fig.add_subplot(2, 2, 3)
-                ax3.axis('off')
+                # Subplot 4: Metrics text
+                ax4 = fig.add_subplot(2, 3, 4)
+                ax4.axis('off')
                 
                 metrics_text = f"""GEL BOUNDARY SHAPE METRICS
 {'='*40}
@@ -1413,12 +1749,12 @@ Perimeter: {metrics.perimeter_pixels:.0f} pixels
 {'='*40}
 Quality Score: {result.quality_score:.2f}
 """
-                ax3.text(0.05, 0.95, metrics_text, transform=ax3.transAxes,
-                        fontsize=10, fontfamily='monospace',
+                ax4.text(0.05, 0.95, metrics_text, transform=ax4.transAxes,
+                        fontsize=9, fontfamily='monospace',
                         verticalalignment='top')
                 
-                # Subplot 4: Saturation analysis
-                ax4 = fig.add_subplot(2, 2, 4)
+                # Subplot 5: Saturation analysis
+                ax5 = fig.add_subplot(2, 3, 5)
                 if result.saturation_pct > 0:
                     sat_vis = np.zeros((*img_array.shape, 3), dtype=np.uint8)
                     sat_vis[:, :, 0] = img_array  # Red channel
@@ -1427,31 +1763,60 @@ Quality Score: {result.quality_score:.2f}
                     sat_vis[result.saturation_mask.astype(bool), 0] = 255  # Highlight in red
                     sat_vis[result.saturation_mask.astype(bool), 1] = 0
                     sat_vis[result.saturation_mask.astype(bool), 2] = 0
-                    ax4.imshow(sat_vis)
-                    ax4.set_title(f"⚠️ Saturation: {result.saturation_pct:.1f}% of mat\n"
+                    ax5.imshow(sat_vis)
+                    ax5.set_title(f"⚠️ Saturation: {result.saturation_pct:.1f}% of mat\n"
                                  f"(Red regions = unknown thickness)")
                 else:
-                    ax4.imshow(img_array, cmap='gray')
-                    ax4.set_title("✓ No saturation detected")
-                ax4.axis('off')
+                    ax5.imshow(img_array, cmap='gray')
+                    ax5.set_title("✓ No saturation detected")
+                ax5.axis('off')
+                
+                # Subplot 6: Intensity histogram
+                ax6 = fig.add_subplot(2, 3, 6)
+                mat_values = img_array[result.mat_mask.astype(bool)]
+                bg_values = img_array[result.background_mask.astype(bool)]
+                if result.gel_detected:
+                    gel_values = img_array[result.gel_mask.astype(bool)]
+                    if len(gel_values) > 0:
+                        ax6.hist(gel_values, bins=50, alpha=0.6, label='Gel', color='purple')
+                if len(bg_values) > 0:
+                    ax6.hist(bg_values, bins=50, alpha=0.6, label='Background', color='blue')
+                if len(mat_values) > 0:
+                    ax6.hist(mat_values, bins=50, alpha=0.6, label='Mat', color='green')
+                ax6.legend(fontsize=8)
+                ax6.set_xlabel('Intensity')
+                ax6.set_ylabel('Count')
+                ax6.set_title('Region Intensity Distribution')
                 
                 # Notes
                 if metrics.notes:
                     note_str = "\n".join(f"• {n}" for n in metrics.notes)
-                    fig.text(0.5, 0.02, f"Notes: {note_str}", ha='center', fontsize=9)
+                    fig.text(0.5, 0.01, f"Notes: {note_str}", ha='center', fontsize=8)
             else:
                 # No gel detected
-                ax3 = fig.add_subplot(2, 2, 3)
-                ax3.axis('off')
-                ax3.text(0.5, 0.5, "No distinct gel region detected.\n\n"
-                        "The gel boundary may not be visible in this image,\n"
-                        "or the detection threshold needs adjustment.",
-                        ha='center', va='center', fontsize=11)
-                
-                ax4 = fig.add_subplot(2, 2, 4)
-                ax4.imshow(img_array, cmap='gray')
-                ax4.set_title(f"Saturation: {result.saturation_pct:.1f}%")
+                ax4 = fig.add_subplot(2, 3, 4)
                 ax4.axis('off')
+                ax4.text(0.5, 0.5, "No distinct gel region detected.\n\n"
+                        "The gel boundary may not be visible,\n"
+                        "or detection threshold needs adjustment.",
+                        ha='center', va='center', fontsize=10)
+                
+                ax5 = fig.add_subplot(2, 3, 5)
+                ax5.imshow(img_array, cmap='gray')
+                ax5.set_title(f"Saturation: {result.saturation_pct:.1f}%")
+                ax5.axis('off')
+                
+                ax6 = fig.add_subplot(2, 3, 6)
+                mat_values = img_array[result.mat_mask.astype(bool)]
+                bg_values = img_array[result.background_mask.astype(bool)]
+                if len(bg_values) > 0:
+                    ax6.hist(bg_values, bins=50, alpha=0.6, label='Background', color='blue')
+                if len(mat_values) > 0:
+                    ax6.hist(mat_values, bins=50, alpha=0.6, label='Mat', color='green')
+                ax6.legend(fontsize=8)
+                ax6.set_xlabel('Intensity')
+                ax6.set_ylabel('Count')
+                ax6.set_title('Region Intensity Distribution')
             
             fig.tight_layout()
             

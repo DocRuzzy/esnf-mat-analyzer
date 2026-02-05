@@ -248,6 +248,12 @@ class VisualizationConfig:
     fft_amplification: float = 2.0
     """Amplification factor for FFT-enhanced frequencies. Default 2.0."""
 
+    heatmap_gamma: float = 0.2
+    """Power-law gamma for heatmap normalization (0.1-1.0).
+    gamma < 1 allocates more colormap to high values (stretches bright mat region).
+    gamma = 0.2 gives ~90% colormap to upper half, ~10% to lower half.
+    gamma = 1.0 is linear (no power-law). Default 0.2."""
+
     radial_avg_line_color: str = "blue"
     """Color for the average line in radial profiles."""
 
