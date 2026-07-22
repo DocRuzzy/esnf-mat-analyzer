@@ -35,6 +35,10 @@ class AdvancedBackgroundProcessor:
 
         Matches original 'basic' method semantics used in tests. Provides a
         lightweight fast path before advanced multi-step workflow.
+
+        NOTE: preview/legacy only — intentionally uses DIVISION semantics and
+        is NOT the analyze pipeline. The analyze path goes through
+        _step3_correct_image, which defaults to the SUBTRACT operator.
         """
         if image.ndim != 2:
             raise ValueError("basic_correction expects a 2D grayscale image")
@@ -57,6 +61,9 @@ class AdvancedBackgroundProcessor:
         Implements a 2D morphological opening with an elliptical (approx ball)
         structuring element then division normalization (preferred over raw
         subtraction for illumination). Named '3d' for historical reasons.
+
+        NOTE: preview/legacy only — uses DIVISION semantics; the analyze
+        pipeline goes through _step3_correct_image (SUBTRACT default).
         """
         if image.ndim != 2:
             raise ValueError("rolling_ball_3d expects a 2D grayscale image")

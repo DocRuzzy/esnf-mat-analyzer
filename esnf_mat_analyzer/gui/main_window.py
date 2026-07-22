@@ -21,6 +21,26 @@ from esnf_mat_analyzer.processing.pipeline_steps import (
 import yaml
 
 
+# Single source of truth: GUI radio-button value -> correction method enum.
+# Both analyze paths previously had their own copies with DIFFERENT fallbacks
+# (POLYNOMIAL_SURFACE vs NONE), so an unknown selection could silently apply
+# a correction the user never chose.
+BG_METHOD_MAP = {
+    "none": BackgroundCorrectionMethod.NONE,
+    "basic": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+    "rolling_ball": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
+    "restore": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+    "homomorphic": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+}
+
+
+def map_bg_method(selected: str) -> BackgroundCorrectionMethod:
+    """Map a GUI background-method selection to its enum (NONE if unknown)."""
+    if selected not in BG_METHOD_MAP:
+        print(f"Warning: unknown background method '{selected}', using NONE")
+    return BG_METHOD_MAP.get(selected, BackgroundCorrectionMethod.NONE)
+
+
 class MainWindow(tk.Tk):
     def __init__(self, user_config_path=None):
         super().__init__()
@@ -1137,16 +1157,7 @@ class MainWindow(tk.Tk):
         
         # Apply selected background correction method from GUI
         selected_bg_method = self.bg_method_var.get()
-        bg_method_map = {
-            "none": BackgroundCorrectionMethod.NONE,
-            "basic": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
-            "rolling_ball": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
-            "restore": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
-            "homomorphic": BackgroundCorrectionMethod.COMPLETE_WORKFLOW
-        }
-        config.processing.background_correction_method = bg_method_map.get(
-            selected_bg_method, BackgroundCorrectionMethod.POLYNOMIAL_SURFACE
-        )
+        config.processing.background_correction_method = map_bg_method(selected_bg_method)
         
         # Apply selected thickness model from GUI
         selected_thickness_model = self.thickness_model_var.get()
@@ -1905,19 +1916,9 @@ Quality Score: {result.quality_score:.2f}
             # Create config with selected methods
             config = get_default_config()
             
-            # Background correction method
-            method_mapping = {
-                "none": BackgroundCorrectionMethod.NONE,
-                "basic": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
-                "rolling_ball": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
-                "restore": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
-                "homomorphic": BackgroundCorrectionMethod.COMPLETE_WORKFLOW  # Using complete workflow as fallback
-            }
-            
+            # Background correction method (shared map, see BG_METHOD_MAP)
             selected_bg_method = self.bg_method_var.get()
-            config.processing.background_correction_method = method_mapping.get(
-                selected_bg_method, BackgroundCorrectionMethod.NONE
-            )
+            config.processing.background_correction_method = map_bg_method(selected_bg_method)
             
             # Thickness model selection
             thickness_mapping = {

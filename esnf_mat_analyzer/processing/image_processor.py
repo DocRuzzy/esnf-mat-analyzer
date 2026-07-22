@@ -113,15 +113,28 @@ class ImageProcessor(IImageProcessor):
             self.logger.error(f"Error loading image from {path}: {e}")
             raise ValueError(f"Failed to load image: {e}")
 
-    def process(self, image: np.ndarray, config: 'ProcessingConfig') -> np.ndarray:
-        """Process raw image according to configuration."""
+    def process(self, image: np.ndarray, config: 'ProcessingConfig',
+                apply_leveling: bool = True) -> np.ndarray:
+        """Process raw image according to configuration.
+
+        Args:
+            image: Raw image array
+            config: Processing configuration
+            apply_leveling: If False, skip the background-leveling step.
+                Callers that apply a dedicated background correction
+                afterwards (e.g. apply_background_correction_with_exclusion)
+                should pass False to avoid correcting the image twice.
+        """
         self.logger.debug("Starting image preprocessing.")
 
         # 1. Grayscale conversion
         processed_image = self._apply_grayscale(image)
 
-        # 2. Background Leveling
-        processed_image = self._apply_leveling(processed_image)
+        # 2. Background Leveling (skipped when a dedicated correction follows)
+        if apply_leveling:
+            processed_image = self._apply_leveling(processed_image)
+        else:
+            self.logger.debug("Skipping leveling (dedicated correction follows).")
 
         # 3. Blur
         processed_image = self._apply_blur(processed_image)
@@ -132,17 +145,18 @@ class ImageProcessor(IImageProcessor):
         self.logger.info("Image preprocessing complete.")
         return processed_image
 
-    def preprocess(self, image: np.ndarray) -> np.ndarray:
+    def preprocess(self, image: np.ndarray, apply_leveling: bool = True) -> np.ndarray:
         """
         Preprocess raw image using the instance configuration.
-        
+
         Args:
             image: Raw image array (RGB format)
-            
+            apply_leveling: If False, skip background leveling (see process())
+
         Returns:
             Preprocessed grayscale image
         """
-        return self.process(image, self.config)
+        return self.process(image, self.config, apply_leveling=apply_leveling)
 
     def crop_image(self, image: np.ndarray, roi: tuple) -> np.ndarray:
         """
@@ -253,13 +267,8 @@ class ImageProcessor(IImageProcessor):
         if method_name == 'none':
             return image
         
-        # Determine Step 2 method from GUI selection (if available)
-        gui_selection = getattr(self.config, 'background_step2_method', None)
-        if gui_selection:
-            background_method = "polynomial" if gui_selection == "polynomial" else "large_kernel_blur"
-        else:
-            # Fallback for backward compatibility
-            background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
+        # Map correction method enum to Step 2 illumination-model choice
+        background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
 
         # Apply the complete 4-step scientific workflow
         results = self.bg_processor.complete_uniformity_analysis(
@@ -334,13 +343,8 @@ class ImageProcessor(IImageProcessor):
         if method_name == 'none':
             return image
         
-        # Get GUI selection for Step 2 method choice
-        gui_selection = getattr(self.config, 'background_step2_method', None)
-        if gui_selection:
-            background_method = "polynomial" if gui_selection == "polynomial" else "large_kernel_blur"
-        else:
-            # Fallback for backward compatibility
-            background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
+        # Map correction method enum to Step 2 illumination-model choice
+        background_method = "polynomial" if method_name in ['polynomial_surface', 'polynomial', 'complete_workflow', 'complete'] else "large_kernel_blur"
 
         # Use four-region detection for proper background identification
         if use_four_region_detection:

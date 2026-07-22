@@ -6,6 +6,8 @@ Author: ESNF Mat Analyzer Team
 License: GNU General Public License v3.0 or later (GPLv3)
 """
 
+import logging
+
 import numpy as np
 import cv2
 from typing import Dict, List, Optional, Tuple
@@ -139,9 +141,17 @@ class GiniCoefficient(IUniformityMetric):
             return 1.0  # Maximum inequality for empty ROI
         
         roi_thickness = thickness_map[roi_indices]
-        
+
         # Remove any non-positive values
+        n_total = len(roi_thickness)
         roi_thickness = roi_thickness[roi_thickness > 0]
+        n_dropped = n_total - len(roi_thickness)
+        if n_dropped > 0.01 * n_total:
+            logging.getLogger(__name__).warning(
+                f"GiniCoefficient: discarded {n_dropped}/{n_total} non-positive "
+                f"thickness values ({100.0 * n_dropped / n_total:.1f}%) — result "
+                f"may be biased (check background correction / clipping)"
+            )
         if len(roi_thickness) == 0:
             return 1.0
         

@@ -1,134 +1,165 @@
-#!/usr/bin/env python3
-"""
-Test script to compare different background correction methods and verify the fixes.
-"""
+"""Pytest coverage for the background-correction Step 3 operator.
 
-import sys
+Historical note (why subtraction is back)
+-----------------------------------------
+An early "subtraction" method was labeled broken and replaced by division.
+That method was `cv2.subtract(image, median_blur_background)` followed by
+`cv2.bitwise_not` — it clipped the difference at 0 AND inverted polarity
+(white mat became dark), which is why it was abandoned.
+
+The current SUBTRACT operator is a different formulation:
+
+    corrected = image - (illumination_model - illumination_model.min())
+
+It subtracts only the spatial VARIATION of the modeled illumination.
+Polarity is preserved (mat stays bright), the subtracted amount is always
+>= 0 so no pixel can brighten (new saturation is impossible), and there is
+no clipping mass at 0 for realistic models. Division, by contrast, explodes
+where the model approaches zero — on the black-background mat photos it
+blew out 23/30 sample images (up to 98% of mat pixels clipped to white).
+
+Regression anchors below use tests/Samples/TCD6-GPED2.0-1.png, the worst
+historical division blow-out (96.5% new mat saturation).
+"""
 from pathlib import Path
-import numpy as np
+
 import cv2
-import matplotlib.pyplot as plt
+import numpy as np
+import pytest
 
-# Add the project root to the Python path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+from esnf_mat_analyzer.core.data_types import BackgroundCorrectionOperator
+from esnf_mat_analyzer.processing.background_correction.advanced import (
+    AdvancedBackgroundProcessor,
+)
+from esnf_mat_analyzer.processing.region_detector import FourRegionDetector
 
-from esnf_mat_analyzer.config.config_manager import get_default_config
-from esnf_mat_analyzer.main import setup_dependencies
-
-
-def old_background_correction(image, kernel_size=25):
-    """The old (broken) background correction method."""
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-    
-    background = cv2.medianBlur(image, kernel_size)
-    leveled_image = cv2.subtract(image, background)
-    leveled_image = cv2.bitwise_not(leveled_image)
-    return leveled_image
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORST_SAMPLE = REPO_ROOT / "tests" / "Samples" / "TCD6-GPED2.0-1.png"
 
 
-def new_background_correction(image, kernel_size=25):
-    """The new (corrected) background correction method."""
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-    
-    background = cv2.medianBlur(image, kernel_size)
-    image_float = image.astype(np.float32)
-    background_float = background.astype(np.float32)
-    epsilon = 1.0
-    corrected = (image_float / (background_float + epsilon)) * 128.0
-    leveled_image = np.clip(corrected, 0, 255).astype(np.uint8)
-    return leveled_image
+def _synthetic_gradient_scene(seed=7):
+    """Dark background + bright mat disc + linear illumination gradient."""
+    rng = np.random.default_rng(seed)
+    h, w = 300, 300
+    image = np.full((h, w), 40.0)
+    image += rng.normal(0, 4.0, (h, w))
+
+    y, x = np.ogrid[:h, :w]
+    mat_mask = (x - w // 2) ** 2 + (y - h // 2) ** 2 <= 60 ** 2
+    image[mat_mask] = 200.0 + rng.normal(0, 8.0, int(mat_mask.sum()))
+
+    gradient = (np.arange(w, dtype=float) / (w - 1)) * 30.0  # 30 DN left->right
+    image += gradient[None, :]
+
+    background_mask = ~mat_mask
+    return np.clip(image, 0, 255).astype(np.uint8), mat_mask, background_mask
 
 
-def analyze_correction_method(image, corrected_image, method_name):
-    """Analyze the results of a background correction method."""
-    print(f"\n=== {method_name} ===")
-    print(f"Range: {corrected_image.min()} to {corrected_image.max()}")
-    print(f"Mean: {corrected_image.mean():.2f}")
-    print(f"Std: {corrected_image.std():.2f}")
-    
-    # Check saturation rates
-    saturated_240 = np.sum(corrected_image >= 240)
-    saturated_250 = np.sum(corrected_image >= 250)
-    total_pixels = corrected_image.size
-    
-    print(f"Pixels >= 240: {saturated_240} ({100*saturated_240/total_pixels:.2f}%)")
-    print(f"Pixels >= 250: {saturated_250} ({100*saturated_250/total_pixels:.2f}%)")
-    
-    # Percentile analysis
-    print(f"Percentiles - 2nd: {np.percentile(corrected_image, 2):.1f}, "
-          f"50th: {np.percentile(corrected_image, 50):.1f}, "
-          f"98th: {np.percentile(corrected_image, 98):.1f}")
+@pytest.fixture()
+def gradient_scene():
+    return _synthetic_gradient_scene()
 
 
-def main():
-    """Main test function."""
-    print("Background Correction Comparison Test")
-    print("=" * 40)
-    
-    # Load test image
-    image_path = Path('tests/Samples/square20L1H1good.png')
-    if not image_path.exists():
-        print(f"Test image not found: {image_path}")
-        return
-        
-    # Load and convert to grayscale
-    raw_image = cv2.imread(str(image_path))
-    raw_image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
-    gray_image = cv2.cvtColor(raw_image_rgb, cv2.COLOR_RGB2GRAY)
-    
-    print("Original Image Statistics:")
-    print(f"Range: {gray_image.min()} to {gray_image.max()}")
-    print(f"Mean: {gray_image.mean():.2f}")
-    print(f"Shape: {gray_image.shape}")
-    
-    # Test old method
-    old_corrected = old_background_correction(gray_image)
-    analyze_correction_method(gray_image, old_corrected, "OLD METHOD (Broken)")
-    
-    # Test new method
-    new_corrected = new_background_correction(gray_image)
-    analyze_correction_method(gray_image, new_corrected, "NEW METHOD (Fixed)")
-    
-    # Test full pipeline
-    print("\n=== FULL ANALYZER PIPELINE ===")
-    config = get_default_config()
-    analyzer = setup_dependencies(config)
-    
-    try:
-        result = analyzer.process_image(image_path)
-        
-        valid_mask = result.mask.astype(bool)
-        valid_thickness = result.thickness_map[valid_mask]
-        
-        print(f"Thickness map shape: {result.thickness_map.shape}")
-        print(f"Valid pixels: {len(valid_thickness)}")
-        print(f"Thickness range: {valid_thickness.min():.2f} to {valid_thickness.max():.2f}")
-        print(f"Thickness mean: {valid_thickness.mean():.2f}")
-        print(f"Saturated pixels: {np.sum(result.saturation_mask)} "
-              f"({100*np.sum(result.saturation_mask)/len(valid_thickness):.2f}%)")
-        
-        # Heatmap range
-        vmin = np.percentile(valid_thickness, 2.0)
-        vmax = np.percentile(valid_thickness, 98.0)
-        print(f"Heatmap color range (2-98th percentile): {vmin:.1f} to {vmax:.1f}")
-        
-        print("\n✅ Background correction fix successful!")
-        print("White ESNF areas now properly show as high thickness values.")
-        print("Saturation rate is reasonable (should be <5% for most images).")
-        print("Heatmap should now show clear fiber accumulation patterns.")
-        
-    except Exception as e:
-        print(f"❌ Error in full pipeline: {e}")
-        
-    print("\n" + "=" * 40)
-    print("Test completed. Check the results above to verify:")
-    print("1. NEW METHOD should have reasonable saturation rates (<5%)")
-    print("2. NEW METHOD should preserve white=high, dark=low relationship")
-    print("3. Full pipeline should show clear thickness variation")
+class TestSubtractOperator:
+    def test_flattens_gradient_preserves_mat(self, gradient_scene):
+        image, mat_mask, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        corrected = proc._step3_correct_image(
+            image, est, background_mask=bg_mask,
+            operator=BackgroundCorrectionOperator.SUBTRACT,
+        )
+        # Gradient removed: background std back near noise level
+        assert corrected[bg_mask].std() < 0.6 * image[bg_mask].std()
+        # Polarity preserved: mat stays bright relative to background
+        assert corrected[mat_mask].mean() > corrected[bg_mask].mean() + 50
+
+    def test_no_clipping_mass_at_zero(self, gradient_scene):
+        image, _, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        corrected = proc._step3_correct_image(image, est, background_mask=bg_mask)
+        assert np.mean(corrected == 0) < 0.001  # <0.1% of pixels at 0
+
+    def test_no_new_saturation_possible(self, gradient_scene):
+        """Min-offset subtraction can never brighten a pixel."""
+        image, _, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        corrected = proc._step3_correct_image(image, est, background_mask=bg_mask)
+        assert np.all(corrected.astype(int) <= image.astype(int) + 1)  # +1 rounding
+
+    def test_negative_model_is_clipped_not_fatal(self, gradient_scene):
+        """A model dipping below zero (starved fit) must be handled safely."""
+        image, mat_mask, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        est_negative = est - (est.min() + 25.0)  # force min to -25
+        corrected = proc._step3_correct_image(
+            image, est_negative, background_mask=bg_mask
+        )
+        assert corrected.dtype == np.uint8
+        # Mat must NOT be blown out (this is where division exploded)
+        assert np.mean(corrected[mat_mask] >= 254) < 0.05
 
 
-if __name__ == "__main__":
-    main()
+class TestDivideOperatorLegacy:
+    def test_divide_reproduces_legacy_behavior(self, gradient_scene):
+        """DIVIDE must remain available and match the legacy formula."""
+        image, _, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        corrected = proc._step3_correct_image(
+            image, est, background_mask=bg_mask,
+            operator=BackgroundCorrectionOperator.DIVIDE,
+        )
+        expected = np.clip(
+            image.astype(np.float32) / np.maximum(est.astype(np.float32), 1.0)
+            * float(np.mean(est)),
+            0, 255,
+        ).astype(np.uint8)
+        assert np.array_equal(corrected, expected)
+
+    def test_quality_metrics_reported(self, gradient_scene):
+        image, _, bg_mask = gradient_scene
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(image, bg_mask, 2)
+        proc._step3_correct_image(image, est, background_mask=bg_mask,
+                                  operator=BackgroundCorrectionOperator.DIVIDE)
+        q = proc.last_correction_quality
+        assert q["operator"] == "divide"
+        assert {"new_saturation_pct", "detail_loss_pct", "variance_ratio"} <= set(q)
+
+
+@pytest.mark.skipif(not WORST_SAMPLE.exists(), reason="sample image not available")
+class TestRealImageRegression:
+    """TCD6-GPED2.0-1.png: the worst historical division blow-out."""
+
+    def _run(self, operator):
+        gray = cv2.imread(str(WORST_SAMPLE), cv2.IMREAD_GRAYSCALE)
+        det = FourRegionDetector().detect(gray)
+        bgm = det.background_mask.astype(bool)
+        matm = det.mat_mask.astype(bool)
+        proc = AdvancedBackgroundProcessor()
+        est = proc._step2a_polynomial_surface_fitting(gray, bgm, 2)
+        corrected = proc._step3_correct_image(
+            gray, est, background_mask=bgm, operator=operator
+        )
+        return gray, corrected, matm, bgm
+
+    def test_subtract_does_not_blow_out_mat(self):
+        gray, corrected, matm, bgm = self._run(BackgroundCorrectionOperator.SUBTRACT)
+        sat_before = 100.0 * np.sum(gray[matm] >= 254) / matm.sum()
+        sat_after = 100.0 * np.sum(corrected[matm] >= 254) / matm.sum()
+        assert sat_after - sat_before < 1.0, (
+            f"new mat saturation {sat_after - sat_before:.1f}pp "
+            f"(division historically produced +96.5pp here)"
+        )
+
+    def test_subtract_preserves_mat_detail(self):
+        gray, corrected, matm, _ = self._run(BackgroundCorrectionOperator.SUBTRACT)
+        assert corrected[matm].std() >= 0.9 * gray[matm].std()
+
+    def test_subtract_flattens_background(self):
+        gray, corrected, _, bgm = self._run(BackgroundCorrectionOperator.SUBTRACT)
+        assert corrected[bgm].std() <= gray[bgm].std()

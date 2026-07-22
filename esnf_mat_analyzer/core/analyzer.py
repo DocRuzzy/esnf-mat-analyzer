@@ -223,7 +223,12 @@ class NanoFiberAnalyzer(AnalyzerInterface):
                 self.logger.error(f"Error during scale detection: {e}", exc_info=True)
 
         # 3. Background Correction (on FULL image, excluding rulers)
-        full_preprocessed_image = self.image_processor.preprocess(raw_image)
+        # Skip leveling in preprocess: apply_background_correction_with_exclusion
+        # below performs the dedicated correction — running both corrected the
+        # image twice (latent double-correction bug).
+        full_preprocessed_image = self.image_processor.preprocess(
+            raw_image, apply_leveling=False
+        )
         
         # Create comprehensive background correction exclusion mask
         bg_exclusion_mask = None
