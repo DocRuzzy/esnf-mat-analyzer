@@ -1,6 +1,6 @@
 # CURRENT - Active Session Tasks
 
-**Last Updated:** 2026-01-31 (Session 3)
+**Last Updated:** 2026-07-22 (Session 4)
 
 This file tracks active work for the current development focus. Updated at session start/end.
 
@@ -12,6 +12,29 @@ This file tracks active work for the current development focus. Updated at sessi
 | 2 | T004: Fix OpenCV cvtColor empty-source crash | Awaiting failing image |
 
 ## Recently Completed (This Session)
+
+### Session 4 - Background Correction Operator Fix (2026-07-22)
+
+- ✅ **Diagnosed division-based correction blow-out** (30-image batch sweep)
+  - Division (`image / model`) blew out 23/30 samples with >5pp new mat saturation
+  - 3 catastrophic (TCD6-GPED2.0-1/-2, TCD6-GPED3.0-1): 74–98% of mat clipped to white
+  - Root cause: additive stray light on black surface is the wrong physics for division;
+    polynomial model went negative under ruler-starved fits and division exploded
+
+- ✅ **Switched to subtraction-based correction (default)**
+  - New `BackgroundCorrectionOperator` enum (SUBTRACT/DIVIDE) in `data_types.py`
+  - Formula: `corrected = image − (model − model.min())` — removes illumination
+    *variation* only; subtracted amount ≥ 0 so new saturation is impossible
+  - Division kept as legacy option via `ProcessingConfig.background_correction_operator`
+  - Detail-preservation blending removed → warn-only QA via `results['correction_quality']`
+
+- ✅ **Validation harness**
+  - `scripts/benchmarks/batch_correction_sweep.py` (--operator subtract|divide, CI exit codes)
+  - **Sweep results: SUBTRACT = 30/30 PASS** (0 new-sat, 0 detail-loss, bg improved 30/30);
+    DIVIDE = FAIL (25 flagged) — confirms fix
+  - Synthetic ground truth: `SyntheticMatConfig` now models additive illumination
+    (linear gradient + reflection blobs); `tests/unit/test_correction_synthetic.py` (8 tests)
+    verifies flattening to noise floor, <20% residual gradient, mat structure r≥0.98
 
 ### Session 3 - GUI Controls
 

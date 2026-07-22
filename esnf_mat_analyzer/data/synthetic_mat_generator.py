@@ -44,6 +44,16 @@ class SyntheticMatConfig:
     # Background properties
     background_level: float = 30.0  # 0-255, simulates black collection surface
     background_noise_std: float = 5.0  # Gaussian noise in background
+
+    # Additive illumination / stray-light field (applied to the WHOLE image).
+    # Simulates uneven lighting and reflections on the black collection
+    # surface — the exact artifact background correction must remove.
+    illumination_gradient_enabled: bool = False
+    illumination_gradient_amplitude: float = 25.0  # Peak-to-trough DN across image
+    illumination_gradient_angle_deg: float = 0.0  # Direction of linear gradient
+    reflection_blobs: int = 0  # Number of Gaussian stray-light spots
+    reflection_blob_intensity_range: Tuple[float, float] = (15.0, 40.0)
+    reflection_blob_sigma_ratio_range: Tuple[float, float] = (0.05, 0.15)  # Of min(h,w)
     
     # Gel boundary properties (dark ring around deposition)
     gel_enabled: bool = True
@@ -106,6 +116,10 @@ class SyntheticMatResult:
     
     # Feature locations for validation
     feature_locations: Dict[str, Any] = field(default_factory=dict)
+
+    # Ground-truth additive illumination field (None if not enabled).
+    # corrected_image should equal (image - illumination_field) up to noise.
+    illumination_field: Optional[np.ndarray] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Export metadata to dictionary (without large arrays)."""
@@ -262,7 +276,14 @@ class SyntheticMatGenerator:
         # Add local noise to mat region
         mat_noise = self._rng.normal(0, cfg.mat_noise_std, (h, w))
         image[mat_mask] += mat_noise[mat_mask]
-        
+
+        # Add ground-truth additive illumination / stray-light field
+        illumination_field = None
+        if (cfg.illumination_gradient_enabled and cfg.illumination_gradient_amplitude > 0) \
+                or cfg.reflection_blobs > 0:
+            illumination_field = self._generate_illumination_field(cfg, h, w)
+            image += illumination_field
+
         # Clip to valid range
         image = np.clip(image, 0, 255).astype(np.uint8)
         
@@ -284,8 +305,44 @@ class SyntheticMatGenerator:
             reference_black=reference_black,
             reference_white=reference_white,
             feature_locations=feature_locations,
+            illumination_field=illumination_field,
         )
-    
+
+    def _generate_illumination_field(self, cfg: SyntheticMatConfig,
+                                     h: int, w: int) -> np.ndarray:
+        """
+        Build the ground-truth additive illumination / stray-light field.
+
+        Components:
+        - Linear gradient: peak-to-trough `illumination_gradient_amplitude`
+          across the image in direction `illumination_gradient_angle_deg`.
+        - Reflection blobs: `reflection_blobs` Gaussian stray-light spots
+          with random position, intensity, and size.
+        """
+        illumination = np.zeros((h, w), dtype=np.float64)
+
+        if cfg.illumination_gradient_enabled and cfg.illumination_gradient_amplitude > 0:
+            theta = np.deg2rad(cfg.illumination_gradient_angle_deg)
+            y, x = np.mgrid[:h, :w]
+            proj = ((x / max(w - 1, 1)) * np.cos(theta)
+                    + (y / max(h - 1, 1)) * np.sin(theta))
+            span = proj.max() - proj.min()
+            if span > 1e-9:
+                proj = (proj - proj.min()) / span
+            illumination += proj * cfg.illumination_gradient_amplitude
+
+        for _ in range(int(cfg.reflection_blobs)):
+            intensity = self._rng.uniform(*cfg.reflection_blob_intensity_range)
+            sigma = self._rng.uniform(*cfg.reflection_blob_sigma_ratio_range) * min(h, w)
+            cy = self._rng.uniform(0, h)
+            cx = self._rng.uniform(0, w)
+            y, x = np.ogrid[:h, :w]
+            illumination += intensity * np.exp(
+                -((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2)
+            )
+
+        return illumination
+
     def _create_irregular_circle(
         self, h: int, w: int, center: Tuple[int, int],
         radius: float, irregularity: float
