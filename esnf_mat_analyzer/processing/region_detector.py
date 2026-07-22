@@ -583,6 +583,18 @@ class FourRegionDetector:
         with np.errstate(invalid='ignore'):
             independent_found = (~nan_mask) & (r_outer > r_mat_edge + 1.0) & (r_mat_edge > 0)
         coverage = float(np.mean(independent_found))
+
+        # Ring-thickness cap: the gel ring's thickness varies smoothly, but
+        # deep-dark smudges/shadow beyond the true ring can drag single
+        # rays far out (over-detection reported on the brightly lit side).
+        # Cap each ray's thickness at 1.6x the median found thickness.
+        if independent_found.any():
+            thickness = r_outer - r_mat_edge
+            t_med = float(np.median(thickness[independent_found]))
+            t_cap = 1.6 * t_med + 2.0
+            with np.errstate(invalid='ignore'):
+                over = independent_found & (thickness > t_cap)
+            r_outer[over] = r_mat_edge[over] + t_cap
         if nan_mask.any():
             idx = np.arange(n_angles)
             valid = ~nan_mask
@@ -591,11 +603,14 @@ class FourRegionDetector:
                 period=n_angles
             )
 
-        # Circular median smoothing bridges glints and single-ray spikes
-        k = 15
+        # Circular smoothing bridges glints and single-ray spikes. The 30th
+        # percentile (not the median) biases toward the SMALLER radius, so
+        # lumpy outward protrusions from background smudges are shaved off
+        # while consistent ring stretches are preserved.
+        k = 18
         padded = np.concatenate([r_outer[-k:], r_outer, r_outer[:k]])
         smoothed = np.array([
-            np.median(padded[i:i + 2 * k + 1]) for i in range(n_angles)
+            np.percentile(padded[i:i + 2 * k + 1], 30) for i in range(n_angles)
         ])
         # Never let smoothing pull the boundary inside the mat edge
         smoothed = np.maximum(smoothed, r_mat_edge)
