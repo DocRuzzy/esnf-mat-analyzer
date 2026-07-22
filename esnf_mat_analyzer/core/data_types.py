@@ -224,7 +224,7 @@ class VisualizationConfig:
     show_saturated: bool = True
     """Whether to highlight saturated regions in visualizations."""
 
-    heatmap_percentile_range: Tuple[float, float] = (2.0, 98.0)
+    heatmap_percentile_range: Tuple[float, float] = (0.5, 99.5)
     """Percentile range for heatmap color scaling (min_percentile, max_percentile)."""
 
     auto_range_heatmap: bool = True
@@ -248,11 +248,16 @@ class VisualizationConfig:
     fft_amplification: float = 2.0
     """Amplification factor for FFT-enhanced frequencies. Default 2.0."""
 
-    heatmap_gamma: float = 0.2
+    display_smoothing: bool = False
+    """Whether to apply mild Gaussian smoothing to heatmap display.
+    When enabled, applies 7x7 Gaussian blur (sigma=1.2) for visual aesthetics.
+    Default False preserves raw detail for accurate visual verification."""
+
+    heatmap_gamma: float = 1.0
     """Power-law gamma for heatmap normalization (0.1-1.0).
     gamma < 1 allocates more colormap to high values (stretches bright mat region).
     gamma = 0.2 gives ~90% colormap to upper half, ~10% to lower half.
-    gamma = 1.0 is linear (no power-law). Default 0.2."""
+    gamma = 1.0 is linear (no power-law distortion). Default 1.0."""
 
     radial_avg_line_color: str = "blue"
     """Color for the average line in radial profiles."""

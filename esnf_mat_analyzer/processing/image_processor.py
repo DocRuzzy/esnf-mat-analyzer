@@ -14,28 +14,51 @@ from ..processing.background_correction.advanced import AdvancedBackgroundProces
 def assess_correction_quality(original, corrected, mat_mask):
     """
     Calculate quality metrics for background correction.
+
     Args:
         original: Original image (np.ndarray)
         corrected: Corrected image (np.ndarray)
         mat_mask: Boolean mask (True for mat region)
+
     Returns:
-        dict with background_cv, mat_preservation, gradient_correlation
+        dict with background_cv, mat_preservation, gradient_correlation.
+        Values are float('nan') if they cannot be computed.
     """
-    import numpy as np
-    # Background uniformity (lower is better)
-    bg_cv = np.std(corrected[~mat_mask]) / np.mean(corrected[~mat_mask])
-    # Mat signal preservation (higher is better)
-    mat_mean_ratio = np.mean(corrected[mat_mask]) / np.mean(original[mat_mask])
-    # Gradient preservation within mat
-    grad_correlation = np.corrcoef(
-        np.gradient(original[mat_mask])[0],
-        np.gradient(corrected[mat_mask])[0]
-    )[0, 1]
-    return {
-        'background_cv': bg_cv,
-        'mat_preservation': mat_mean_ratio,
-        'gradient_correlation': grad_correlation
+    result = {
+        'background_cv': float('nan'),
+        'mat_preservation': float('nan'),
+        'gradient_correlation': float('nan'),
     }
+
+    bool_mask = mat_mask.astype(bool)
+    bg_mask = ~bool_mask
+
+    # Background uniformity (lower is better)
+    bg_values = corrected[bg_mask]
+    if len(bg_values) > 0 and np.mean(bg_values) > 0:
+        result['background_cv'] = float(np.std(bg_values) / np.mean(bg_values))
+
+    # Mat signal preservation (closer to 1.0 is better)
+    mat_orig = original[bool_mask]
+    mat_corr = corrected[bool_mask]
+    if len(mat_orig) > 0 and np.mean(mat_orig) > 0:
+        result['mat_preservation'] = float(np.mean(mat_corr) / np.mean(mat_orig))
+
+    # Gradient preservation within mat
+    if len(mat_orig) > 10:
+        try:
+            grad_orig = np.gradient(mat_orig.astype(np.float64))
+            grad_corr = np.gradient(mat_corr.astype(np.float64))
+            if np.std(grad_orig) > 0 and np.std(grad_corr) > 0:
+                result['gradient_correlation'] = float(
+                    np.corrcoef(grad_orig, grad_corr)[0, 1]
+                )
+            else:
+                result['gradient_correlation'] = 1.0
+        except Exception:
+            pass
+
+    return result
 
 class ImageProcessor(IImageProcessor):
     """

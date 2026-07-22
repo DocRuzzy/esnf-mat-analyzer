@@ -62,9 +62,13 @@ def test_display_results_basic(tmp_path):
     texts = find_texts(tops[0])
     assert texts, "Expected Text widgets in results window"
 
-    # Read content from the Basic Metrics text (first one)
+    # Read content from the Key Metrics summary tab (first text widget)
     content = texts[0].get('1.0', tk.END)
-    assert 'Overall Mat Uniformity' in content or 'Multi-Scale Uniformity Analysis' in content
+    assert 'KEY UNIFORMITY METRICS' in content or 'Composite Uniformity Score' in content
+
+    # Also check that detailed metrics are present in some tab
+    all_content = " ".join(t.get('1.0', tk.END) for t in texts)
+    assert 'Overall Mat Uniformity' in all_content or 'Multi-Scale Uniformity Analysis' in all_content
 
     # Clean up
     try:

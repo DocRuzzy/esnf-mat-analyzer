@@ -64,14 +64,17 @@ class Visualizer(VisualizerInterface):
             enhanced_map = thickness_map.copy()
             title_suffix = ""
 
-        # Mild display smoothing to improve perceived gradient without flattening data
-        try:
-            smoothed_map = cv2.GaussianBlur(enhanced_map.astype(np.float32), (7, 7), sigmaX=1.2, sigmaY=1.2)
-        except Exception:
-            smoothed_map = enhanced_map
-        
+        # Optional display smoothing (off by default to preserve raw detail)
+        if getattr(self.config, 'display_smoothing', False):
+            try:
+                display_map = cv2.GaussianBlur(enhanced_map.astype(np.float32), (7, 7), sigmaX=1.2, sigmaY=1.2)
+            except Exception:
+                display_map = enhanced_map
+        else:
+            display_map = enhanced_map
+
         # Create masked thickness map (only show values within the mask)
-        masked_thickness = np.ma.masked_array(smoothed_map, mask=~(mask.astype(bool)))
+        masked_thickness = np.ma.masked_array(display_map, mask=~(mask.astype(bool)))
         
         # Create figure
         fig, ax = plt.subplots(figsize=self.config.figure_size)
@@ -115,13 +118,17 @@ class Visualizer(VisualizerInterface):
                     vmax = np.percentile(valid_data, max_percentile)
                     self.logger.info(f"Color range (percentiles {min_percentile}-{max_percentile}): [{vmin:.3f}, {vmax:.3f}]")
                 
-                # Use power-law normalization to stretch high thickness values and compress low values
+                # Optional power-law normalization
                 # gamma < 1 allocates more color range to high values (bright mat region)
-                # gamma = 0.2 gives ~90% of colormap to upper half, 10% to lower half
+                # gamma = 1.0 is linear (no distortion, most accurate representation)
                 gamma = self.config.heatmap_gamma  # Configurable via GUI (0.1-1.0)
                 if vmin is not None and vmax is not None and vmax > vmin:
-                    norm = PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
-                    self.logger.info(f"Using power-law normalization (gamma={gamma:.2f}) to enhance high-value contrast")
+                    if gamma < 0.99:
+                        norm = PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+                        self.logger.info(f"Using power-law normalization (gamma={gamma:.2f})")
+                    else:
+                        # gamma ~1.0: use simple linear normalization (no PowerNorm needed)
+                        self.logger.info(f"Using linear normalization (gamma={gamma:.2f})")
         
         # Use bilinear interpolation for smoother visual gradients
         im = ax.imshow(masked_thickness, cmap=cmap, norm=norm, vmin=vmin if norm is None else None, 
@@ -158,9 +165,162 @@ class Visualizer(VisualizerInterface):
         
         # Tight layout for better appearance
         plt.tight_layout()
-        
+
         return fig
-    
+
+    def create_direct_intensity_heatmap(
+        self,
+        grayscale_image: np.ndarray,
+        mask: np.ndarray,
+        saturation_mask: Optional[np.ndarray] = None,
+        title: str = "Direct Intensity Map"
+    ) -> Figure:
+        """
+        Create a heatmap directly from raw grayscale pixel intensities.
+
+        No thickness model transformation, no PowerNorm, no FFT enhancement.
+        This provides ground-truth visualization of what the camera captured,
+        useful for verifying that the processing pipeline preserves real features.
+
+        Args:
+            grayscale_image: 2D grayscale image (0-255 uint8 or float)
+            mask: Binary mask indicating the region of interest
+            saturation_mask: Optional mask of saturated pixels
+            title: Title for the figure
+
+        Returns:
+            Matplotlib Figure object
+        """
+        self.logger.debug("Creating direct intensity heatmap (no transformations)")
+
+        image_float = grayscale_image.astype(np.float32)
+
+        # Create masked array (only show values within mask)
+        masked_intensity = np.ma.masked_array(image_float, mask=~(mask.astype(bool)))
+
+        fig, ax = plt.subplots(figsize=self.config.figure_size)
+        cmap = plt.get_cmap(self.config.colormap)
+
+        # Use simple linear normalization based on actual data range
+        valid_data = masked_intensity.compressed()
+        if len(valid_data) > 0:
+            vmin = float(np.percentile(valid_data, 0.5))
+            vmax = float(np.percentile(valid_data, 99.5))
+        else:
+            vmin, vmax = 0.0, 255.0
+
+        im = ax.imshow(masked_intensity, cmap=cmap, vmin=vmin, vmax=vmax,
+                       interpolation='bilinear')
+
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Pixel Intensity (0-255)')
+
+        # Highlight saturated regions
+        if saturation_mask is not None and self.config.show_saturated:
+            saturation_overlay = np.ma.masked_array(
+                np.ones_like(grayscale_image, dtype=float),
+                mask=~(saturation_mask.astype(bool))
+            )
+            ax.imshow(
+                saturation_overlay,
+                alpha=0.3,
+                cmap=LinearSegmentedColormap.from_list('saturated', ['red', 'red'])
+            )
+
+        # Stats annotation
+        if len(valid_data) > 0:
+            mean_val = float(np.mean(valid_data))
+            std_val = float(np.std(valid_data))
+            cv_val = (std_val / mean_val * 100) if mean_val > 0 else 0
+            ax.set_title(f'{title}\nMean: {mean_val:.1f}, Std: {std_val:.1f}, CV: {cv_val:.1f}%')
+        else:
+            ax.set_title(title)
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+
+        return fig
+
+    def create_spatial_cv_map(
+        self,
+        thickness_map: np.ndarray,
+        mask: np.ndarray,
+        window_size: int = 51
+    ) -> Figure:
+        """
+        Create a spatial coefficient of variation map showing WHERE non-uniformity exists.
+
+        Uses a sliding window to compute local CV (std/mean) across the mat region.
+        This is the most visually interpretable uniformity output.
+
+        Args:
+            thickness_map: 2D thickness/intensity map
+            mask: Binary mask indicating the region of interest
+            window_size: Size of the sliding window (pixels). Odd number recommended.
+
+        Returns:
+            Matplotlib Figure object
+        """
+        self.logger.debug(f"Creating spatial CV map (window={window_size})")
+
+        data = thickness_map.astype(np.float32)
+        bool_mask = mask.astype(bool)
+
+        # Compute local mean and local std using box filter
+        # Replace masked pixels with NaN to avoid contaminating neighbor calculations
+        masked_data = np.where(bool_mask, data, np.nan)
+
+        # Use cv2 for efficient windowed computation
+        # Create a count map (how many valid pixels in each window)
+        valid_float = bool_mask.astype(np.float32)
+        count_map = cv2.boxFilter(valid_float, -1, (window_size, window_size), normalize=False)
+        count_map = np.maximum(count_map, 1)  # avoid division by zero
+
+        # Compute local sum and local sum-of-squares (only over valid pixels)
+        data_masked = np.where(bool_mask, data, 0).astype(np.float32)
+        local_sum = cv2.boxFilter(data_masked, -1, (window_size, window_size), normalize=False)
+        local_sum_sq = cv2.boxFilter(data_masked ** 2, -1, (window_size, window_size), normalize=False)
+
+        local_mean = local_sum / count_map
+        local_var = (local_sum_sq / count_map) - (local_mean ** 2)
+        local_var = np.maximum(local_var, 0)  # clamp numerical noise
+        local_std = np.sqrt(local_var)
+
+        # CV = std / mean (avoid division by zero)
+        local_cv = np.where(local_mean > 1e-6, local_std / local_mean, 0)
+
+        # Mask the CV map
+        masked_cv = np.ma.masked_array(local_cv, mask=~bool_mask)
+
+        fig, ax = plt.subplots(figsize=self.config.figure_size)
+
+        # Use a diverging colormap: green=uniform, red=non-uniform
+        valid_cv = masked_cv.compressed()
+        if len(valid_cv) > 0:
+            cv_vmax = float(np.percentile(valid_cv, 97))
+        else:
+            cv_vmax = 1.0
+
+        im = ax.imshow(masked_cv, cmap='RdYlGn_r', vmin=0, vmax=cv_vmax,
+                       interpolation='bilinear')
+
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Local CV (lower = more uniform)')
+
+        if len(valid_cv) > 0:
+            mean_cv = float(np.mean(valid_cv))
+            ax.set_title(f'Spatial Uniformity Map (window={window_size}px)\n'
+                        f'Mean local CV: {mean_cv:.3f}')
+        else:
+            ax.set_title(f'Spatial Uniformity Map (window={window_size}px)')
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+
+        return fig
+
     def _enhance_with_fft(self, thickness_map: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
         Enhance thickness map using FFT to reveal high-frequency variations.

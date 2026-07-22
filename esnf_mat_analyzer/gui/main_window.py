@@ -14,6 +14,10 @@ from esnf_mat_analyzer.main import setup_dependencies
 from esnf_mat_analyzer.visualization.visualization import Visualizer
 from esnf_mat_analyzer.core.data_types import VisualizationConfig, BackgroundCorrectionMethod, ThicknessModelType
 from esnf_mat_analyzer.config.config_manager import get_default_config, save_config, load_config
+from esnf_mat_analyzer.processing.pipeline_steps import (
+    load_and_convert_grayscale, detect_regions, correct_background,
+    create_intensity_map, compute_uniformity_metrics, StepResult
+)
 import yaml
 
 
@@ -61,6 +65,22 @@ class MainWindow(tk.Tk):
         self.left_panel.bind("<Configure>", on_frame_configure)
         left_canvas.bind("<Configure>", on_canvas_configure)
         # --- End of scrollable left panel setup ---
+
+        # --- Mode Toggle (Simple / Advanced) ---
+        self.mode_frame = ttk.Frame(self.left_panel)
+        self.mode_frame.pack(fill=tk.X, pady=(5, 2), padx=5)
+        self.mode_var = tk.StringVar(value="simple")
+        ttk.Radiobutton(
+            self.mode_frame, text="Simple Mode", variable=self.mode_var,
+            value="simple", command=self._toggle_mode
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(
+            self.mode_frame, text="Advanced Mode", variable=self.mode_var,
+            value="advanced", command=self._toggle_mode
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Pipeline step results storage
+        self._pipeline_data = {}
 
         # File selection
         self.file_frame = ttk.LabelFrame(self.left_panel, text="File Selection")
@@ -431,8 +451,15 @@ class MainWindow(tk.Tk):
         self._calibration_point_selection_active = False
         self._toggle_physical_cal_ui()
 
+        # --- Simple Mode: Run Pipeline button ---
+        self.run_pipeline_button = ttk.Button(
+            self.analysis_frame, text="Run Pipeline (Step-by-Step)",
+            command=self.run_pipeline
+        )
+        self.run_pipeline_button.pack(padx=5, pady=5)
+
         self.analyze_button = ttk.Button(
-            self.analysis_frame, text="Analyze", command=self.analyze
+            self.analysis_frame, text="Analyze (Full)", command=self.analyze
         )
         self.analyze_button.pack(padx=5, pady=5)
 
@@ -483,13 +510,13 @@ class MainWindow(tk.Tk):
         gamma_frame = ttk.Frame(self.image_controls_frame)
         gamma_frame.pack(fill=tk.X, padx=5, pady=2)
         ttk.Label(gamma_frame, text="Heatmap Gamma:").pack(side=tk.LEFT)
-        self.heatmap_gamma_var = tk.DoubleVar(value=0.2)
+        self.heatmap_gamma_var = tk.DoubleVar(value=1.0)
         self.gamma_scale = ttk.Scale(
             gamma_frame, from_=0.1, to=1.0, variable=self.heatmap_gamma_var,
             orient=tk.HORIZONTAL, length=100
         )
         self.gamma_scale.pack(side=tk.LEFT, padx=5)
-        self.gamma_label = ttk.Label(gamma_frame, text="0.20")
+        self.gamma_label = ttk.Label(gamma_frame, text="1.00")
         self.gamma_label.pack(side=tk.LEFT)
         self.heatmap_gamma_var.trace_add("write", self._update_gamma_label)
         ttk.Label(self.image_controls_frame, 
@@ -572,6 +599,12 @@ class MainWindow(tk.Tk):
         self.canvas.bind("<ButtonRelease-3>", self.end_pan)
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)  # Mouse wheel zoom
         self.canvas.bind("<Configure>", self.on_canvas_configure)
+
+        # Initialize analysis result storage
+        self.last_analysis_result = None
+
+        # Apply initial mode (simple mode hides advanced controls)
+        self._toggle_mode()
 
     def select_files(self):
         files = filedialog.askopenfilenames(
@@ -1106,13 +1139,13 @@ class MainWindow(tk.Tk):
         selected_bg_method = self.bg_method_var.get()
         bg_method_map = {
             "none": BackgroundCorrectionMethod.NONE,
-            "basic": BackgroundCorrectionMethod.BASIC,
-            "rolling_ball": BackgroundCorrectionMethod.ROLLING_BALL,
-            "restore": BackgroundCorrectionMethod.RESTORE,
-            "homomorphic": BackgroundCorrectionMethod.HOMOMORPHIC
+            "basic": BackgroundCorrectionMethod.POLYNOMIAL_SURFACE,
+            "rolling_ball": BackgroundCorrectionMethod.LARGE_KERNEL_BLUR,
+            "restore": BackgroundCorrectionMethod.COMPLETE_WORKFLOW,
+            "homomorphic": BackgroundCorrectionMethod.COMPLETE_WORKFLOW
         }
         config.processing.background_correction_method = bg_method_map.get(
-            selected_bg_method, BackgroundCorrectionMethod.BASIC
+            selected_bg_method, BackgroundCorrectionMethod.POLYNOMIAL_SURFACE
         )
         
         # Apply selected thickness model from GUI
@@ -2160,19 +2193,17 @@ Quality Score: {result.quality_score:.2f}
         results_window = tk.Toplevel(self)
         results_window.title("Analysis Results")
         results_window.geometry("800x600")
-        
-        # Debug log to check result content
-        print(f"Result metrics: {result.metrics}")
-        print(f"Traditional metrics: {[k for k, v in result.metrics.items() if not k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))]}")
-        print(f"Mat analysis metrics: {[k for k, v in result.metrics.items() if k.startswith(('anisotropy_', 'texture_', 'psd_', 'overall_mat_uniformity'))]}")
 
         # Create notebook for tabbed results
         notebook = ttk.Notebook(results_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+        # --- Key Metrics Summary Tab (first tab, most visible) ---
+        self._add_key_metrics_tab(notebook, result)
+
         # Basic Results Tab
         basic_frame = ttk.Frame(notebook)
-        notebook.add(basic_frame, text="Basic Metrics")
+        notebook.add(basic_frame, text="Detailed Metrics")
         
         basic_text = tk.Text(basic_frame, wrap=tk.WORD)
         basic_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -2374,6 +2405,99 @@ Quality Score: {result.quality_score:.2f}
         mat_text.insert(tk.END, mat_result)
         mat_text.config(state=tk.DISABLED)
 
+    def _add_key_metrics_tab(self, notebook, result):
+        """Add a 'Key Metrics' summary tab as the first tab in the results notebook."""
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Key Metrics")
+
+        text = tk.Text(frame, wrap=tk.WORD, font=("Consolas", 10))
+        text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        lines = []
+        lines.append("KEY UNIFORMITY METRICS")
+        lines.append("=" * 45)
+        lines.append(f"Image: {result.image_path.name}")
+        lines.append(f"Processing Time: {result.processing_time:.2f}s")
+        lines.append("")
+
+        m = result.metrics
+
+        # 1. Overall CV (most important single number)
+        thickness_map = result.thickness_map
+        mask = result.mask.astype(bool)
+        mat_values = thickness_map[mask]
+        if len(mat_values) > 0 and np.mean(mat_values) > 0:
+            overall_cv = float(np.std(mat_values) / np.mean(mat_values))
+            lines.append(f"Overall CV:  {overall_cv:.4f}  ({overall_cv*100:.1f}%)")
+            lines.append("  (Coefficient of Variation - lower = more uniform)")
+        else:
+            lines.append("Overall CV:  N/A (no valid mat pixels)")
+        lines.append("")
+
+        # 2. Gini coefficient
+        gini = m.get('GiniCoefficient', m.get('gini_coefficient', None))
+        if gini is not None and isinstance(gini, float) and not math.isnan(gini):
+            lines.append(f"Gini Coefficient:  {gini:.4f}")
+            lines.append("  (0 = perfectly equal, 1 = maximally unequal)")
+        lines.append("")
+
+        # 3. Radial gradient (center vs edge)
+        if len(mat_values) > 0:
+            ys, xs = np.where(mask)
+            cy, cx = float(np.mean(ys)), float(np.mean(xs))
+            distances = np.sqrt((xs - cx) ** 2 + (ys - cy) ** 2)
+            max_dist = float(np.max(distances)) if len(distances) > 0 else 0
+            if max_dist > 0:
+                inner_vals = mat_values[distances < 0.3 * max_dist]
+                outer_vals = mat_values[distances > 0.7 * max_dist]
+                inner_mean = float(np.mean(inner_vals)) if len(inner_vals) > 0 else 0
+                outer_mean = float(np.mean(outer_vals)) if len(outer_vals) > 0 else 0
+                radial_ratio = inner_mean / outer_mean if outer_mean > 0 else 1.0
+                lines.append(f"Radial Gradient:  {radial_ratio:.3f}  (center/edge)")
+                lines.append(f"  Center mean: {inner_mean:.1f},  Edge mean: {outer_mean:.1f}")
+                if radial_ratio > 1.1:
+                    lines.append("  -> Mat is thicker at center")
+                elif radial_ratio < 0.9:
+                    lines.append("  -> Mat is thicker at edges")
+                else:
+                    lines.append("  -> Radially uniform")
+            lines.append("")
+
+        # 4. Coverage
+        coverage = float(np.sum(mask)) / float(mask.size) * 100
+        lines.append(f"Mat Coverage:  {coverage:.1f}% of image")
+
+        # 5. Saturation
+        sat_mask = result.saturation_mask
+        if sat_mask is not None and np.any(mask):
+            sat_pct = float(np.sum(sat_mask & mask)) / float(np.sum(mask)) * 100
+            lines.append(f"Saturation:  {sat_pct:.1f}% of mat pixels")
+            if sat_pct > 5:
+                lines.append("  WARNING: High saturation may affect accuracy")
+        lines.append("")
+
+        # 6. Overall mat uniformity (composite score if available)
+        overall = m.get('overall_mat_uniformity', None)
+        if overall is not None and isinstance(overall, float) and not math.isnan(overall):
+            rating = self._get_uniformity_rating(overall)
+            lines.append(f"Composite Uniformity Score:  {overall:.4f}  ({rating})")
+            lines.append("  (Weighted combination of texture, PSD, anisotropy)")
+        lines.append("")
+
+        # 7. Radial Uniformity Index
+        rui = m.get('RadialUniformityIndex', None)
+        if rui is not None and isinstance(rui, float) and not math.isnan(rui):
+            lines.append(f"Radial Uniformity Index:  {rui:.4f}")
+            lines.append("  (0-1, higher = more radially uniform)")
+
+        lines.append("")
+        lines.append("-" * 45)
+        lines.append("See 'Detailed Metrics' and 'Mat-Scale Analysis'")
+        lines.append("tabs for full breakdown.")
+
+        text.insert(tk.END, "\n".join(lines))
+        text.config(state=tk.DISABLED)
+
     def _get_uniformity_rating(self, score):
         """Convert uniformity score to a descriptive rating."""
         if score >= 0.8:
@@ -2423,6 +2547,253 @@ Quality Score: {result.quality_score:.2f}
         except Exception:
             # Fallback to messagebox if Toplevel fails
             messagebox.showinfo("Help", help_text)
+
+
+    # ----------------------------------------------------------------
+    # Simple / Advanced mode toggle
+    # ----------------------------------------------------------------
+
+    def _toggle_mode(self):
+        """Show/hide controls based on Simple vs Advanced mode."""
+        mode = self.mode_var.get()
+        # Frames that are only visible in Advanced mode
+        advanced_frames = [
+            self.bg_method_frame,
+            self.method_params_frame,
+            self.thickness_model_frame,
+            self.fft_frame,
+            self.calibration_frame,
+            self.physical_cal_frame,
+            self.deposition_frame,
+        ]
+        # Widgets to hide in Simple mode
+        advanced_widgets = [
+            self.background_leveling_checkbox,
+            self.auto_range_checkbox,
+            self.analyze_button,
+            self.set_scale_button,
+            self.show_heatmap_button,
+        ]
+
+        if mode == "simple":
+            for frame in advanced_frames:
+                try:
+                    frame.pack_forget()
+                except Exception:
+                    pass
+            for widget in advanced_widgets:
+                try:
+                    widget.pack_forget()
+                except Exception:
+                    pass
+            # Ensure pipeline button is visible
+            self.run_pipeline_button.pack(padx=5, pady=5)
+            self.export_image_button.pack(padx=5, pady=5)
+        else:
+            # Advanced mode: show everything
+            # Re-pack in the correct order within analysis_frame
+            self.background_leveling_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+            self.auto_range_checkbox.pack(padx=5, pady=2, anchor=tk.W)
+            self.bg_method_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.method_params_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.thickness_model_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.fft_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.calibration_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.physical_cal_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.run_pipeline_button.pack(padx=5, pady=5)
+            self.analyze_button.pack(padx=5, pady=5)
+            self.set_scale_button.pack(padx=5, pady=5)
+            self.deposition_frame.pack(fill=tk.X, padx=5, pady=5)
+            self.show_heatmap_button.pack(padx=5, pady=5)
+            self.export_image_button.pack(padx=5, pady=5)
+
+    # ----------------------------------------------------------------
+    # Step-by-step pipeline
+    # ----------------------------------------------------------------
+
+    def run_pipeline(self):
+        """Run the step-by-step processing pipeline and show results."""
+        # Get selected file
+        selection = self.file_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No File", "Please select an image file first.")
+            return
+        index = selection[0]
+        filepath = self.selected_files[index]
+
+        # Step 1: Load image
+        step1 = load_and_convert_grayscale(filepath)
+        if not step1.success:
+            messagebox.showerror("Error", f"Step 1 failed: {step1.error_message}")
+            return
+
+        grayscale = step1.data['grayscale']
+
+        # Step 2: Region detection
+        step2 = detect_regions(grayscale)
+        if not step2.success:
+            messagebox.showerror("Error", f"Step 2 failed: {step2.error_message}")
+            return
+
+        detection_result = step2.data['detection_result']
+
+        # Step 3: Background correction
+        step3 = correct_background(grayscale, detection_result, method="polynomial_surface")
+        if not step3.success:
+            messagebox.showerror("Error", f"Step 3 failed: {step3.error_message}")
+            return
+
+        corrected = step3.data['corrected']
+
+        # Step 4: Intensity heat map
+        mat_mask = detection_result.mat_mask
+        step4 = create_intensity_map(corrected, mat_mask)
+        if not step4.success:
+            messagebox.showerror("Error", f"Step 4 failed: {step4.error_message}")
+            return
+
+        # Step 5: Uniformity metrics
+        intensity_map = step4.data['intensity_map']
+        step5 = compute_uniformity_metrics(intensity_map, mat_mask)
+        if not step5.success:
+            messagebox.showerror("Error", f"Step 5 failed: {step5.error_message}")
+            return
+
+        # Store results
+        self._pipeline_data = {
+            'step1': step1,
+            'step2': step2,
+            'step3': step3,
+            'step4': step4,
+            'step5': step5,
+        }
+
+        # Show the pipeline results window
+        self._show_pipeline_results()
+
+    def _show_pipeline_results(self):
+        """Display pipeline results in a tabbed window."""
+        data = self._pipeline_data
+        if not data:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Pipeline Results (Step-by-Step)")
+        win.geometry("1000x700")
+
+        notebook = ttk.Notebook(win)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        steps = [
+            ("1. Original", data.get('step1')),
+            ("2. Regions", data.get('step2')),
+            ("3. Background", data.get('step3')),
+            ("4. Heat Map", data.get('step4')),
+            ("5. Uniformity", data.get('step5')),
+        ]
+
+        for tab_name, step_result in steps:
+            if step_result is None:
+                continue
+
+            tab = ttk.Frame(notebook)
+            notebook.add(tab, text=tab_name)
+
+            if step_result.display_image is not None:
+                self._add_step_image_to_tab(tab, step_result)
+            else:
+                ttk.Label(tab, text="No display available for this step.").pack(pady=20)
+
+            # Add step-specific data below the image
+            if step_result.data:
+                self._add_step_data_to_tab(tab, tab_name, step_result)
+
+    def _add_step_image_to_tab(self, parent, step_result):
+        """Add a step's display image to a tab frame."""
+        display_img = step_result.display_image
+        if display_img is None:
+            return
+
+        # Convert BGR numpy array to PIL Image for Tk display
+        if len(display_img.shape) == 3:
+            rgb = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
+        else:
+            rgb = cv2.cvtColor(display_img, cv2.COLOR_GRAY2RGB)
+
+        # Scale to fit within a reasonable display size
+        h, w = rgb.shape[:2]
+        max_dim = 650
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            rgb = cv2.resize(rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        pil_img = Image.fromarray(rgb)
+        tk_img = ImageTk.PhotoImage(pil_img)
+
+        img_label = ttk.Label(parent, image=tk_img)
+        img_label.image = tk_img  # prevent GC
+        img_label.pack(padx=5, pady=5)
+
+    def _add_step_data_to_tab(self, parent, tab_name, step_result):
+        """Add text data below the image in a step tab."""
+        data = step_result.data
+        text_lines = []
+
+        if "2. Regions" in tab_name:
+            stats = data.get('region_stats', {})
+            text_lines.append(f"Mat: {stats.get('mat_pct', 0):.1f}% of image")
+            text_lines.append(f"Background: {stats.get('background_pct', 0):.1f}% of image")
+            if stats.get('gel_detected'):
+                text_lines.append(f"Gel: {stats.get('gel_pct', 0):.1f}% (intensity={stats.get('gel_intensity', 0):.1f})")
+            else:
+                text_lines.append("Gel: not detected")
+            text_lines.append(f"Background intensity: {stats.get('background_intensity', 0):.1f}")
+            text_lines.append(f"Mat intensity: {stats.get('mat_intensity_range', (0, 0))}")
+            text_lines.append(f"Quality score: {stats.get('quality_score', 0):.2f}")
+            text_lines.append(f"Saturation: {stats.get('saturation_pct', 0):.1f}%")
+
+        elif "3. Background" in tab_name:
+            before = data.get('before_stats', {})
+            after = data.get('after_stats', {})
+            text_lines.append(f"Method: {data.get('method', 'unknown')}")
+            text_lines.append(f"Mat mean: {before.get('mat_mean', 0):.1f} -> {after.get('mat_mean', 0):.1f}")
+            text_lines.append(f"Background std: {before.get('bg_std', 0):.1f} -> {after.get('bg_std', 0):.1f}")
+
+        elif "4. Heat Map" in tab_name:
+            stats = data.get('intensity_stats', {})
+            text_lines.append(f"Mean: {stats.get('mean', 0):.1f}")
+            text_lines.append(f"Std: {stats.get('std', 0):.1f}")
+            text_lines.append(f"CV: {stats.get('cv', 0):.1f}%")
+            text_lines.append(f"Range: {stats.get('min', 0):.0f} - {stats.get('max', 0):.0f}")
+            text_lines.append(f"Saturated: {stats.get('saturation_pct', 0):.1f}%")
+
+        elif "5. Uniformity" in tab_name:
+            metrics = data.get('metrics', {})
+            text_lines.append(f"Overall CV: {metrics.get('overall_cv', 0):.4f} ({metrics.get('overall_cv', 0)*100:.1f}%)")
+            text_lines.append(f"Gini coefficient: {metrics.get('gini_coefficient', 0):.4f}")
+            text_lines.append(f"Radial ratio (center/edge): {metrics.get('radial_ratio', 0):.3f}")
+            text_lines.append(f"  Center mean: {metrics.get('center_mean', 0):.1f}, Edge mean: {metrics.get('edge_mean', 0):.1f}")
+            text_lines.append(f"Mean local CV: {metrics.get('mean_local_cv', 0):.4f}")
+            text_lines.append(f"Coverage: {metrics.get('coverage', 0)*100:.1f}%")
+
+            # Sector analysis
+            sectors = data.get('sector_analysis', [])
+            if sectors:
+                text_lines.append("")
+                text_lines.append("Sector Analysis (8 angular sectors):")
+                for s in sectors:
+                    text_lines.append(f"  Sector {s['sector']} ({s['angle_deg']:.0f} deg): "
+                                     f"mean={s['mean']:.1f}, CV={s['cv']:.3f}")
+
+        if text_lines:
+            info_frame = ttk.Frame(parent)
+            info_frame.pack(fill=tk.X, padx=10, pady=5)
+            info_text = "\n".join(text_lines)
+            label = ttk.Label(info_frame, text=info_text, justify=tk.LEFT,
+                             font=("Consolas", 9))
+            label.pack(anchor=tk.W)
 
 
 if __name__ == "__main__":

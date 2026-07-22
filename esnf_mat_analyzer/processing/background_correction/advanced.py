@@ -288,29 +288,105 @@ class AdvancedBackgroundProcessor:
         self.logger.debug(f"Enhanced large kernel blur completed (kernels: {kernels})")
         return estimated_background
 
-    def _step3_correct_image(self, image: np.ndarray, 
+    def _step3_correct_image(self, image: np.ndarray,
                            estimated_background: np.ndarray) -> np.ndarray:
         """
-        Step 3: Correct the Image using division.
-        
+        Step 3: Correct the Image using division, with detail-preservation guard.
+
         Applies physically correct division operation and normalization.
+        If the correction introduces significant new saturation or reduces
+        local variance (detail loss), blends the corrected result with the
+        original to preserve detail.
         """
-        image_float = image.astype(np.float32) 
+        image_float = image.astype(np.float32)
         background_float = estimated_background.astype(np.float32)
-        
+
         # Avoid division by zero
         background_float = np.maximum(background_float, 1.0)
-        
+
         # Perform division correction (physically correct)
         corrected = image_float / background_float
-        
+
         # Normalize for viewing (restore reasonable intensity range)
-        mean_background = np.mean(estimated_background)
-        final_image = corrected * mean_background
-        
+        mean_background = float(np.mean(estimated_background))
+        final_float = corrected * mean_background
+
+        # --- Detail preservation checks ---
+        max_new_saturation_pct = 2.0
+        detail_loss_threshold = 0.05
+
+        # Check 1: New saturation (pixels pushed to 255 that weren't before)
+        original_saturated = int(np.sum(image_float >= 254))
+        corrected_saturated = int(np.sum(final_float >= 254.5))
+        new_saturated = max(0, corrected_saturated - original_saturated)
+        total_pixels = image_float.size
+        new_saturation_pct = 100.0 * new_saturated / total_pixels
+
+        # Check 2: Local variance preservation
+        window = 15
+        orig_local_mean = cv2.boxFilter(image_float, -1, (window, window))
+        orig_local_var = np.maximum(
+            cv2.boxFilter(image_float ** 2, -1, (window, window)) - orig_local_mean ** 2, 0
+        )
+        corr_local_mean = cv2.boxFilter(final_float, -1, (window, window))
+        corr_local_var = np.maximum(
+            cv2.boxFilter(final_float ** 2, -1, (window, window)) - corr_local_mean ** 2, 0
+        )
+
+        valid_mask = orig_local_var > 1.0
+        if np.any(valid_mask):
+            orig_var_mean = float(np.mean(orig_local_var[valid_mask]))
+            corr_var_mean = float(np.mean(corr_local_var[valid_mask]))
+            variance_ratio = corr_var_mean / max(orig_var_mean, 1e-6)
+        else:
+            variance_ratio = 1.0
+
+        detail_loss = max(0.0, 1.0 - variance_ratio)
+
+        # Decision: blend if correction caused harm
+        needs_blending = False
+        blend_alpha = 1.0  # 1.0 = fully corrected
+
+        if new_saturation_pct > max_new_saturation_pct:
+            self.logger.warning(
+                f"Background correction introduced {new_saturation_pct:.1f}% "
+                f"new saturation (threshold: {max_new_saturation_pct:.1f}%). "
+                f"Blending with original to preserve detail."
+            )
+            needs_blending = True
+            blend_alpha = max(0.3, 1.0 - new_saturation_pct / 10.0)
+
+        if detail_loss > detail_loss_threshold:
+            self.logger.warning(
+                f"Background correction reduced local variance by "
+                f"{detail_loss*100:.1f}% (threshold: {detail_loss_threshold*100:.1f}%). "
+                f"Blending with original to preserve detail."
+            )
+            needs_blending = True
+            loss_alpha = max(0.3, 1.0 - detail_loss * 2.0)
+            blend_alpha = min(blend_alpha, loss_alpha)
+
+        if needs_blending:
+            # Blend: shift original to match corrected mean, then mix
+            orig_mean = float(np.mean(image_float))
+            corr_mean = float(np.mean(final_float))
+            shift_factor = corr_mean / max(orig_mean, 1.0)
+            shifted_original = image_float * shift_factor
+
+            final_float = blend_alpha * final_float + (1.0 - blend_alpha) * shifted_original
+            self.logger.info(
+                f"Applied detail-preservation blending (alpha={blend_alpha:.2f}, "
+                f"new_sat={new_saturation_pct:.1f}%, detail_loss={detail_loss*100:.1f}%)"
+            )
+        else:
+            self.logger.debug(
+                f"Correction quality OK: new_sat={new_saturation_pct:.1f}%, "
+                f"detail_loss={detail_loss*100:.1f}%"
+            )
+
         # Clip to valid range
-        final_image = np.clip(final_image, 0, 255)
-        
+        final_image = np.clip(final_float, 0, 255)
+
         self.logger.debug("Image correction completed using division")
         return final_image.astype(np.uint8)
 
@@ -1173,8 +1249,8 @@ class AdvancedBackgroundProcessor:
         self.logger.info("Step 1: Detecting four regions (background, gel, mat, ruler)...")
         detector = FourRegionDetector()
         
-        # Pass any user exclusion mask (will be combined with detected rulers)
-        region_result = detector.detect(image, exclusion_mask=exclusion_mask)
+        # Pass any user exclusion mask as ruler_mask (areas to exclude from analysis)
+        region_result = detector.detect(image, ruler_mask=exclusion_mask)
         
         # Store region masks
         results['mat_mask'] = region_result.mat_mask.astype(bool)
