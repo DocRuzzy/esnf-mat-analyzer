@@ -79,6 +79,42 @@ class TestGelRing:
         assert coverage > 0.6, f"gel covers only {coverage:.0%} of directions"
 
 
+RING_SAMPLE = SAMPLES / "TCD6-GPED2.0-1.png"  # complete ring + mat spill outside gel
+
+
+@pytest.mark.skipif(not RING_SAMPLE.exists(), reason="sample not available")
+class TestCompleteGelRing:
+    """User-reported (2026-07-22): on TCD6-GPED2.0-1 the gel forms a
+    complete ring around the mat, with spilled mat OUTSIDE the gel at
+    4:30-6:00 clock direction. Early radial detection missed the outer
+    gel band (only 10-20 DN below local background), the gel behind the
+    spill (rays started at the outermost mat pixel), and the bottom arc
+    (gel indistinguishable from deep shadow -> now interpolated from
+    angular neighbours)."""
+
+    @pytest.fixture()
+    def result(self):
+        gray = cv2.imread(str(RING_SAMPLE), cv2.IMREAD_GRAYSCALE)
+        return gray, FourRegionDetector().detect(gray)
+
+    def test_ring_is_complete(self, result):
+        gray, res = result
+        mat = res.mat_mask.astype(bool)
+        gel = res.gel_mask.astype(bool)
+        ys, xs = np.nonzero(mat)
+        cy, cx = ys.mean(), xs.mean()
+        gys, gxs = np.nonzero(gel)
+        angles = np.arctan2(gys - cy, gxs - cx)
+        bins = np.histogram(angles, bins=36, range=(-np.pi, np.pi))[0]
+        coverage = np.mean(bins > 0)
+        assert coverage >= 0.9, f"gel ring covers only {coverage:.0%} of directions"
+
+    def test_gel_not_patchy(self, result):
+        """Patchy detection found only ~2700 px; the complete ring is far larger."""
+        gray, res = result
+        assert res.gel_mask.sum() > 4000
+
+
 @pytest.mark.skipif(not GLARE_SAMPLE.exists(), reason="sample not available")
 class TestMatSelection:
     def test_mat_is_central_disc_not_glare_band(self):

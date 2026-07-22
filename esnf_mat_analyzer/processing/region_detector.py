@@ -432,6 +432,14 @@ class FourRegionDetector:
         mat_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.drawContours(mat_mask, [largest_contour], -1, 1, thickness=cv2.FILLED)
 
+        # Filling the contour also fills dark gel bays enclosed between the
+        # mat body and attached bright spill arcs — those enclosed pixels are
+        # gel, not mat. Restrict the fill to pixels that are actually bright,
+        # then reseal genuine interior speckle.
+        mat_mask = mat_mask & (binary > 0).astype(np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mat_mask = cv2.morphologyEx(mat_mask, cv2.MORPH_CLOSE, kernel)
+
         return mat_mask.astype(bool), largest_contour
 
     def _detect_gel_region_improved(
@@ -483,7 +491,7 @@ class FourRegionDetector:
         ys, xs = np.nonzero(mat_mask)
         cy, cx = float(ys.mean()), float(xs.mean())
         r_mat_typ = float(np.sqrt(mat_mask.sum() / np.pi))
-        max_ext = max(10, int(0.45 * r_mat_typ))
+        max_ext = max(10, int(0.55 * r_mat_typ))
 
         # Sanity: there must be usable area beyond the possible gel band
         dilate_kernel = cv2.getStructuringElement(
@@ -509,6 +517,7 @@ class FourRegionDetector:
 
         r_outer = np.zeros(n_angles, dtype=np.float64)
         r_mat_edge = np.zeros(n_angles, dtype=np.float64)
+        bg_locals = []
         for i in range(n_angles):
             samples = np.arange(0, max_r)
             px = (cx + samples * cos_a[i]).astype(int)
@@ -520,7 +529,15 @@ class FourRegionDetector:
                 r_mat_edge[i] = 0.0
                 r_outer[i] = 0.0
                 continue
-            edge_idx = int(np.max(np.nonzero(on_mat)[0]))
+            # Walk from the end of the CONTIGUOUS mat body, not the
+            # outermost mat pixel: spilled mat outside the gel ring would
+            # otherwise start the walk beyond the gel and hide it. The
+            # spill stays classified as mat because the mat mask is
+            # subtracted from the annulus at the end. Small gaps (<=3 px,
+            # antialiasing) do not break the run.
+            on_idx = np.nonzero(on_mat)[0]
+            gap_pos = np.nonzero(np.diff(on_idx) > 3)[0]
+            edge_idx = int(on_idx[gap_pos[0]]) if gap_pos.size else int(on_idx.max())
             r_mat_edge[i] = samples[edge_idx]
             r_outer[i] = samples[edge_idx]
 
@@ -533,18 +550,46 @@ class FourRegionDetector:
             walk_vals = gray_f[py[walk_lo:walk_hi + 1], px[walk_lo:walk_hi + 1]]
             far_vals = gray_f[py[walk_hi + 1:far_hi + 1], px[walk_hi + 1:far_hi + 1]]
             bg_local = float(np.median(far_vals))
+            bg_locals.append(bg_local)
             gel_dark = float(np.percentile(walk_vals, 5))
             if bg_local - gel_dark < min_contrast:
-                continue  # no gel contrast in this direction
+                # Gel and background are indistinguishable by intensity in
+                # this direction (e.g. gel over deep shadow). Mark unknown;
+                # the radius is interpolated from angular neighbours below —
+                # the gel annulus is spatially continuous.
+                r_outer[i] = np.nan
+                continue
 
-            # Deep-dark cut: closer to gel darkness than to local background
-            deep_thr = gel_dark + 0.35 * (bg_local - gel_dark)
+            # Gel cut: meaningfully below the local background. The outer
+            # half of the gel ring can sit only 10-20 DN below background
+            # (thin translucent gel), so the cut is placed at 65% of the
+            # gel-to-background contrast — still strictly below bg_local,
+            # which keeps sustained background/shadow runs excluded.
+            deep_thr = gel_dark + 0.65 * (bg_local - gel_dark)
             deep_idx = np.nonzero(walk_vals <= deep_thr)[0]
             if deep_idx.size:
                 r_outer[i] = samples[walk_lo + int(deep_idx.max())]
 
         if not np.any(r_mat_edge > 0):
             return None
+
+        # Interpolate unknown (NaN) radii from angular neighbours with
+        # circular wrap-around: directions where gel and shadow were
+        # indistinguishable inherit the boundary from adjacent directions.
+        nan_mask = np.isnan(r_outer)
+        if nan_mask.all():
+            return None
+        # Angular coverage of INDEPENDENT gel findings (pre-interpolation)
+        with np.errstate(invalid='ignore'):
+            independent_found = (~nan_mask) & (r_outer > r_mat_edge + 1.0) & (r_mat_edge > 0)
+        coverage = float(np.mean(independent_found))
+        if nan_mask.any():
+            idx = np.arange(n_angles)
+            valid = ~nan_mask
+            r_outer = np.interp(
+                idx, idx[valid], r_outer[valid],
+                period=n_angles
+            )
 
         # Circular median smoothing bridges glints and single-ray spikes
         k = 15
@@ -575,11 +620,15 @@ class FourRegionDetector:
             return np.zeros((h, w), dtype=bool), None, False
 
         gel_intensity = float(np.mean(gray[gel_mask]))
-        bg_intensity = float(np.mean(gray[analysis_mask & ~mat_dilated]))
-        if gel_intensity >= bg_intensity:
-            self.logger.warning(
-                f"Radial 'gel' ({gel_intensity:.1f}) not darker than background "
-                f"({bg_intensity:.1f}); rejecting"
+        # Sanity check by ANGULAR COVERAGE, not by comparing the gel mean
+        # against a background average: every walked-in pixel was already
+        # required to sit below its own ray's local background, and on
+        # unevenly lit photos a global mean/median comparison mixes lit
+        # and shadowed sides and falsely rejects legitimate gel.
+        if coverage < 0.25:
+            self.logger.info(
+                f"Radial gel coverage only {coverage:.0%} of directions; "
+                f"treating as no gel"
             )
             return np.zeros((h, w), dtype=bool), None, False
 
@@ -589,8 +638,8 @@ class FourRegionDetector:
         gel_contour = max(contours, key=cv2.contourArea) if contours else None
 
         self.logger.info(
-            f"Radial gel detection: {gel_area} px, intensity={gel_intensity:.1f} "
-            f"(background={bg_intensity:.1f})"
+            f"Radial gel detection: {gel_area} px, intensity={gel_intensity:.1f}, "
+            f"angular coverage={coverage:.0%}"
         )
         return gel_mask, gel_contour, True
 
@@ -758,19 +807,70 @@ class FourRegionDetector:
             score += 0.2
         
         if gel_detected:
-            # CRITICAL: Gel should be darker than background
-            if gel_intensity < background_intensity * 0.9:
-                score += 0.3  # High score for correct ordering
-            else:
-                score += 0.0  # No credit if ordering is wrong
+            # CRITICAL: Gel should be darker than its LOCAL background.
+            # A global mean comparison fails on unevenly lit photos (a
+            # shadowed side drags the global background mean to or below
+            # the gel mean even when the gel is locally darker everywhere),
+            # so compare per angular sector against the adjacent background.
+            frac = self._gel_locally_darker_fraction(gray, gel_mask, background_mask)
+            if frac >= 0.7:
+                score += 0.3  # High score for correct local ordering
+            elif frac >= 0.5:
+                score += 0.15
+            # Bonus for clear separation in nearly all directions
+            if frac >= 0.9:
+                score += 0.1
         else:
             score += 0.15  # Partial credit if gel not expected
-        
-        # Bonus for clear separation
-        if gel_detected and gel_intensity < background_intensity * 0.7:
-            score += 0.1
-        
+
         return min(score, 1.0)
+
+    def _gel_locally_darker_fraction(
+        self,
+        gray: np.ndarray,
+        gel_mask: np.ndarray,
+        background_mask: np.ndarray,
+        n_sectors: int = 12
+    ) -> float:
+        """Fraction of angular sectors where gel is darker than the
+        background immediately around it (median vs median)."""
+        gel = gel_mask.astype(bool)
+        if not gel.any():
+            return 0.0
+        band = cv2.dilate(
+            gel.astype(np.uint8),
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
+        ).astype(bool) & background_mask.astype(bool) & ~gel
+
+        gys, gxs = np.nonzero(gel)
+        cy, cx = float(gys.mean()), float(gxs.mean())
+
+        def sector_of(ys, xs):
+            ang = np.arctan2(ys - cy, xs - cx)
+            return ((ang + np.pi) / (2 * np.pi) * n_sectors).astype(int) % n_sectors
+
+        gel_sec = sector_of(gys, gxs)
+        bys, bxs = np.nonzero(band)
+        if len(bys) == 0:
+            return 0.0
+        bg_sec = sector_of(bys, bxs)
+
+        gel_vals = gray[gys, gxs].astype(np.float64)
+        bg_vals = gray[bys, bxs].astype(np.float64)
+
+        ok = total = 0
+        for s in range(n_sectors):
+            gv = gel_vals[gel_sec == s]
+            bv = bg_vals[bg_sec == s]
+            if len(gv) < 20 or len(bv) < 20:
+                continue
+            total += 1
+            # Compare the gel's DARK QUARTILE against the background median:
+            # translucent gel carries bright glints that pull its median up
+            # to background level, but its dark tail stays distinctly below.
+            if np.percentile(gv, 25) < np.median(bv) - 5.0:
+                ok += 1
+        return ok / total if total else 0.0
     
     def visualize_regions(
         self,
