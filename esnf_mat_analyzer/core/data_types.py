@@ -31,7 +31,7 @@ class BackgroundCorrectionMethod(Enum):
     
     Step 1: Isolate Background Pixels (automatic)
     Step 2: Model Uneven Illumination (choice of method below)  
-    Step 3: Correct Image (automatic division)
+    Step 3: Correct Image (operator chosen via BackgroundCorrectionOperator)
     Step 4: Analyze Mat Uniformity (automatic)
 
     - NONE: Skip background correction entirely
@@ -43,6 +43,28 @@ class BackgroundCorrectionMethod(Enum):
     POLYNOMIAL_SURFACE = auto()
     LARGE_KERNEL_BLUR = auto()
     COMPLETE_WORKFLOW = auto()
+
+
+class BackgroundCorrectionOperator(Enum):
+    """
+    Operator for Step 3 of the background correction workflow.
+
+    Orthogonal to BackgroundCorrectionMethod (which selects the Step 2
+    illumination model): this chooses HOW the modeled illumination is
+    removed from the image.
+
+    - SUBTRACT: corrected = image - model + background_reference.
+      Correct for ADDITIVE stray light / reflections on a dark (black)
+      collection surface. Bounded error when the illumination model is
+      imperfect; preserves mat signal. Default.
+    - DIVIDE: corrected = image / model * mean(model).
+      Correct for MULTIPLICATIVE shading (e.g. transmitted-light
+      microscopy). Explodes where the model approaches zero — unsafe on
+      dark backgrounds with sparse background sampling.
+    """
+    SUBTRACT = auto()
+    DIVIDE = auto()
+
 
 class ThicknessModelType(Enum):
     """Models for converting brightness to thickness."""
@@ -73,6 +95,9 @@ class ProcessingConfig:
 
     background_correction_method: BackgroundCorrectionMethod = BackgroundCorrectionMethod.NONE
     """Method for background correction."""
+
+    background_correction_operator: BackgroundCorrectionOperator = BackgroundCorrectionOperator.SUBTRACT
+    """Step 3 operator: SUBTRACT (additive stray-light model, default) or DIVIDE (legacy)."""
 
     blur_kernel_size: int = 5
     """Size of Gaussian blur kernel. Should be odd. Set to 0 to disable blurring."""

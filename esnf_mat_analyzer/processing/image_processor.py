@@ -265,7 +265,8 @@ class ImageProcessor(IImageProcessor):
         results = self.bg_processor.complete_uniformity_analysis(
             image,
             background_method=background_method,
-            polynomial_order=getattr(self.config, 'polynomial_order', 2)
+            polynomial_order=getattr(self.config, 'polynomial_order', 2),
+            operator=getattr(self.config, 'background_correction_operator', None)
         )
         return results['corrected_image']
             
@@ -348,7 +349,8 @@ class ImageProcessor(IImageProcessor):
                 image,
                 background_method=background_method,
                 polynomial_order=getattr(self.config, 'polynomial_order', 2),
-                exclusion_mask=exclusion_mask
+                exclusion_mask=exclusion_mask,
+                operator=getattr(self.config, 'background_correction_operator', None)
             )
             
             # Log calibration info for downstream use
@@ -364,7 +366,8 @@ class ImageProcessor(IImageProcessor):
                 image,
                 background_method=background_method,
                 exclusion_mask=exclusion_mask,
-                polynomial_order=getattr(self.config, 'polynomial_order', 2)
+                polynomial_order=getattr(self.config, 'polynomial_order', 2),
+                operator=getattr(self.config, 'background_correction_operator', None)
             )
         
         return results['corrected_image']

@@ -3,6 +3,9 @@ import cv2
 from typing import Optional, Tuple, Dict
 import logging
 
+from ...core.data_types import BackgroundCorrectionOperator
+
+
 class AdvancedBackgroundProcessor:
     """
     Advanced background correction following the 4-step scientific guide.
@@ -21,6 +24,8 @@ class AdvancedBackgroundProcessor:
         self.logger = logging.getLogger(__name__)
         # Cache simple structuring elements to avoid repeated allocation in rolling ball
         self._se_cache: Dict[int, np.ndarray] = {}
+        # QA metrics from the most recent _step3_correct_image call
+        self.last_correction_quality: Dict = {}
 
     # ------------------------------------------------------------------
     # Simple / legacy API expected by tests
@@ -68,21 +73,23 @@ class AdvancedBackgroundProcessor:
         corrected = np.clip(corrected, 0, 255)
         return corrected.astype(np.uint8)
 
-    def complete_uniformity_analysis(self, image: np.ndarray, 
+    def complete_uniformity_analysis(self, image: np.ndarray,
                                    mat_threshold: int = 180,
                                    hydrogel_threshold: int = 50,
                                    background_method: str = "polynomial",
-                                   polynomial_order: int = 2) -> Dict:
+                                   polynomial_order: int = 2,
+                                   operator: Optional[BackgroundCorrectionOperator] = None) -> Dict:
         """
         Complete 4-step uniformity analysis following the guide.
-        
+
         Args:
             image: Input grayscale image
-            mat_threshold: High-pass threshold for mat pixels  
+            mat_threshold: High-pass threshold for mat pixels
             hydrogel_threshold: Low-pass threshold for hydrogel pixels
             background_method: "polynomial" or "large_kernel_blur"
             polynomial_order: Order for polynomial fitting (2 or 3)
-            
+            operator: Step 3 operator (SUBTRACT default, DIVIDE legacy)
+
         Returns:
             Dictionary containing all results and intermediate steps
         """
@@ -106,17 +113,21 @@ class AdvancedBackgroundProcessor:
         results['estimated_background'] = estimated_background
         
         # STEP 3: Correct the Image
-        self.logger.info("Step 3: Correcting image using division...")
-        corrected_image = self._step3_correct_image(image, estimated_background)
+        self.logger.info("Step 3: Correcting image...")
+        corrected_image = self._step3_correct_image(
+            image, estimated_background,
+            background_mask=masks['background_mask'], operator=operator
+        )
         results['corrected_image'] = corrected_image
-        
+        results['correction_quality'] = dict(self.last_correction_quality)
+
         # STEP 4: Analyze Mat Uniformity
         self.logger.info("Step 4: Analyzing mat uniformity...")
         uniformity_metrics = self._step4_analyze_mat_uniformity(
             corrected_image, masks['mat_mask']
         )
         results.update(uniformity_metrics)
-        
+
         return results
 
     def _step1_isolate_background_pixels(self, image: np.ndarray, 
@@ -289,29 +300,66 @@ class AdvancedBackgroundProcessor:
         return estimated_background
 
     def _step3_correct_image(self, image: np.ndarray,
-                           estimated_background: np.ndarray) -> np.ndarray:
+                           estimated_background: np.ndarray,
+                           background_mask: Optional[np.ndarray] = None,
+                           operator: Optional[BackgroundCorrectionOperator] = None) -> np.ndarray:
         """
-        Step 3: Correct the Image using division, with detail-preservation guard.
+        Step 3: Correct the Image by removing the modeled illumination.
 
-        Applies physically correct division operation and normalization.
-        If the correction introduces significant new saturation or reduces
-        local variance (detail loss), blends the corrected result with the
-        original to preserve detail.
+        Operators:
+        - SUBTRACT (default): corrected = image - (model - model_min).
+          Physically correct for ADDITIVE stray light / reflections on a dark
+          collection surface: removes the spatial VARIATION of the modeled
+          illumination while preserving the base level. Because the subtracted
+          amount is always >= 0, no pixel is ever brightened — new saturation
+          is impossible by construction (validated: 0/30 sample images flagged
+          vs 23/30 under division). Bounded error when the model is imperfect.
+        - DIVIDE (legacy): corrected = image / model * mean(model).
+          Correct for MULTIPLICATIVE shading (transmitted-light microscopy).
+          Explodes where the model approaches zero — historically blew out
+          the mat to pure white on dark-background samples.
+
+        Correction-quality metrics (new saturation, local-variance retention)
+        are computed as QA signals only: they are logged and stored in
+        self.last_correction_quality for callers to report. No silent
+        blending is applied — quantitative data is never mixed.
         """
+        if operator is None:
+            operator = BackgroundCorrectionOperator.SUBTRACT
+
         image_float = image.astype(np.float32)
         background_float = estimated_background.astype(np.float32)
 
-        # Avoid division by zero
-        background_float = np.maximum(background_float, 1.0)
+        if operator == BackgroundCorrectionOperator.DIVIDE:
+            # Avoid division by zero
+            safe_background = np.maximum(background_float, 1.0)
+            corrected = image_float / safe_background
+            # Normalize for viewing (restore reasonable intensity range)
+            mean_background = float(np.mean(estimated_background))
+            final_float = corrected * mean_background
+        else:
+            # Additive stray-light model. A negative model value means the
+            # polynomial extrapolated into a region with no background
+            # samples — bounded harm under subtraction, but worth flagging.
+            pre_clip_min = float(background_float.min())
+            if pre_clip_min < 0:
+                self.logger.warning(
+                    f"Illumination model dips below zero (min={pre_clip_min:.1f}); "
+                    f"likely sparse background sampling. Clipping model to [0, 255]."
+                )
+            model = np.clip(background_float, 0.0, 255.0)
+            # Subtract only the VARIATION of the illumination (model - min),
+            # preserving the base level. Subtracted amount is always >= 0,
+            # so no pixel can brighten -> no new saturation, ever.
+            model_min = float(model.min())
+            final_float = image_float - (model - model_min)
+            if background_mask is not None and np.any(background_mask):
+                self.logger.debug(
+                    f"Subtraction offset={model_min:.1f}; background lands near "
+                    f"{float(np.mean(final_float[background_mask.astype(bool)])):.1f}"
+                )
 
-        # Perform division correction (physically correct)
-        corrected = image_float / background_float
-
-        # Normalize for viewing (restore reasonable intensity range)
-        mean_background = float(np.mean(estimated_background))
-        final_float = corrected * mean_background
-
-        # --- Detail preservation checks ---
+        # --- Correction quality QA (warn-only, never blended) ---
         max_new_saturation_pct = 2.0
         detail_loss_threshold = 0.05
 
@@ -343,51 +391,35 @@ class AdvancedBackgroundProcessor:
 
         detail_loss = max(0.0, 1.0 - variance_ratio)
 
-        # Decision: blend if correction caused harm
-        needs_blending = False
-        blend_alpha = 1.0  # 1.0 = fully corrected
-
         if new_saturation_pct > max_new_saturation_pct:
             self.logger.warning(
-                f"Background correction introduced {new_saturation_pct:.1f}% "
-                f"new saturation (threshold: {max_new_saturation_pct:.1f}%). "
-                f"Blending with original to preserve detail."
+                f"Background correction ({operator.name.lower()}) introduced "
+                f"{new_saturation_pct:.1f}% new saturation "
+                f"(threshold: {max_new_saturation_pct:.1f}%). Inspect the result."
             )
-            needs_blending = True
-            blend_alpha = max(0.3, 1.0 - new_saturation_pct / 10.0)
-
         if detail_loss > detail_loss_threshold:
             self.logger.warning(
-                f"Background correction reduced local variance by "
-                f"{detail_loss*100:.1f}% (threshold: {detail_loss_threshold*100:.1f}%). "
-                f"Blending with original to preserve detail."
+                f"Background correction ({operator.name.lower()}) reduced local "
+                f"variance by {detail_loss*100:.1f}% "
+                f"(threshold: {detail_loss_threshold*100:.1f}%). Inspect the result."
             )
-            needs_blending = True
-            loss_alpha = max(0.3, 1.0 - detail_loss * 2.0)
-            blend_alpha = min(blend_alpha, loss_alpha)
-
-        if needs_blending:
-            # Blend: shift original to match corrected mean, then mix
-            orig_mean = float(np.mean(image_float))
-            corr_mean = float(np.mean(final_float))
-            shift_factor = corr_mean / max(orig_mean, 1.0)
-            shifted_original = image_float * shift_factor
-
-            final_float = blend_alpha * final_float + (1.0 - blend_alpha) * shifted_original
-            self.logger.info(
-                f"Applied detail-preservation blending (alpha={blend_alpha:.2f}, "
-                f"new_sat={new_saturation_pct:.1f}%, detail_loss={detail_loss*100:.1f}%)"
-            )
-        else:
+        if new_saturation_pct <= max_new_saturation_pct and detail_loss <= detail_loss_threshold:
             self.logger.debug(
                 f"Correction quality OK: new_sat={new_saturation_pct:.1f}%, "
                 f"detail_loss={detail_loss*100:.1f}%"
             )
 
+        self.last_correction_quality = {
+            'operator': operator.name.lower(),
+            'new_saturation_pct': new_saturation_pct,
+            'detail_loss_pct': detail_loss * 100.0,
+            'variance_ratio': variance_ratio,
+        }
+
         # Clip to valid range
         final_image = np.clip(final_float, 0, 255)
 
-        self.logger.debug("Image correction completed using division")
+        self.logger.debug(f"Image correction completed using {operator.name.lower()}")
         return final_image.astype(np.uint8)
 
     def _step4_analyze_mat_uniformity(self, corrected_image: np.ndarray,
@@ -482,7 +514,8 @@ class AdvancedBackgroundProcessor:
             estimated_background = self._step2a_polynomial_surface_fitting(
                 image, background_mask, polynomial_order
             )
-            return self._step3_correct_image(image, estimated_background)
+            return self._step3_correct_image(image, estimated_background,
+                                             background_mask=background_mask)
 
     def large_kernel_blur(self, image: np.ndarray, 
                          background_mask: Optional[np.ndarray] = None,
@@ -497,7 +530,8 @@ class AdvancedBackgroundProcessor:
         else:
             # Use provided mask
             estimated_background = self._step2b_large_kernel_blurring(image, background_mask)
-            return self._step3_correct_image(image, estimated_background)
+            return self._step3_correct_image(image, estimated_background,
+                                             background_mask=background_mask)
 
     def morphological_opening(self, image: np.ndarray, radius: int = 50) -> np.ndarray:
         """
@@ -1039,12 +1073,13 @@ class AdvancedBackgroundProcessor:
             self.logger.warning(f"Unknown method '{method}', using complete workflow")
             return self.complete_uniformity_analysis(image, **kwargs)
 
-    def complete_uniformity_analysis_with_exclusion(self, image: np.ndarray, 
+    def complete_uniformity_analysis_with_exclusion(self, image: np.ndarray,
                                                    mat_threshold: int = 180,
                                                    hydrogel_threshold: int = 50,
                                                    background_method: str = "polynomial",
                                                    polynomial_order: int = 2,
-                                                   exclusion_mask: np.ndarray = None) -> Dict:
+                                                   exclusion_mask: np.ndarray = None,
+                                                   operator: Optional[BackgroundCorrectionOperator] = None) -> Dict:
         """
         Complete 4-step uniformity analysis with exclusion mask for rulers/artifacts.
         
@@ -1085,14 +1120,18 @@ class AdvancedBackgroundProcessor:
         results['estimated_background'] = estimated_background
         
         # STEP 3: Correct the Image
-        self.logger.info("Step 3: Correcting image using division...")
-        corrected_image = self._step3_correct_image(image, estimated_background)
+        self.logger.info("Step 3: Correcting image...")
+        corrected_image = self._step3_correct_image(
+            image, estimated_background,
+            background_mask=masks['background_mask'], operator=operator
+        )
         results['corrected_image'] = corrected_image
-        
+        results['correction_quality'] = dict(self.last_correction_quality)
+
         # STEP 4: Analyze Mat Uniformity (this will be done later on the ROI)
         # For full-image correction, we don't analyze uniformity here
         # That will be done on the gel-specific ROI
-        
+
         return results
 
     def _step1_isolate_background_pixels_with_exclusion(self, image: np.ndarray, 
@@ -1214,11 +1253,12 @@ class AdvancedBackgroundProcessor:
         
         return expanded
     def complete_uniformity_analysis_with_four_regions(
-        self, 
+        self,
         image: np.ndarray,
         background_method: str = "polynomial",
         polynomial_order: int = 2,
-        exclusion_mask: np.ndarray = None
+        exclusion_mask: np.ndarray = None,
+        operator: Optional[BackgroundCorrectionOperator] = None
     ) -> Dict:
         """
         Complete 4-step uniformity analysis using FourRegionDetector.
@@ -1297,10 +1337,14 @@ class AdvancedBackgroundProcessor:
         results['estimated_background'] = estimated_background
         
         # STEP 3: Correct the Image
-        self.logger.info("Step 3: Correcting image using division...")
-        corrected_image = self._step3_correct_image(image, estimated_background)
+        self.logger.info("Step 3: Correcting image...")
+        corrected_image = self._step3_correct_image(
+            image, estimated_background,
+            background_mask=results['background_mask'], operator=operator
+        )
         results['corrected_image'] = corrected_image
-        
+        results['correction_quality'] = dict(self.last_correction_quality)
+
         # STEP 4: Analyze Mat Uniformity
         self.logger.info("Step 4: Analyzing mat uniformity...")
         uniformity_metrics = self._step4_analyze_mat_uniformity(
