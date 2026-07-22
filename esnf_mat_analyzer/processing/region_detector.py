@@ -187,7 +187,24 @@ class FourRegionDetector:
         
         # Step 4: TRUE background is everything outside mat AND gel (and ruler)
         background_mask = analysis_mask & ~mat_mask & ~gel_mask & ~detected_ruler_mask
-        
+
+        # Safety valve: if the HEURISTIC ruler mask ate so much of the image
+        # that background coverage collapsed (<5%), the mask is almost
+        # certainly over-detected — drop it rather than starve the
+        # background fit. Caller-provided ruler masks are trusted as-is.
+        heuristic_ruler = ruler_mask is None and self.ruler_detection_enabled
+        if heuristic_ruler and np.sum(background_mask) < 0.05 * h * w:
+            self.logger.warning(
+                f"Background coverage {100 * np.sum(background_mask) / (h * w):.1f}% "
+                f"after heuristic ruler masking (<5%): dropping heuristic ruler "
+                f"mask to avoid starving the background fit."
+            )
+            detected_ruler_mask = np.zeros((h, w), dtype=bool)
+            ruler_detected = False
+            analysis_mask_no_ruler = (roi_mask.astype(bool) if roi_mask is not None
+                                      else np.ones((h, w), dtype=bool))
+            background_mask = analysis_mask_no_ruler & ~mat_mask & ~gel_mask
+
         # Ensure we have some background
         if np.sum(background_mask) < 100:
             self.logger.warning("Very limited true background detected")
@@ -256,25 +273,32 @@ class FourRegionDetector:
     def _detect_ruler_region(self, gray: np.ndarray) -> np.ndarray:
         """
         Detect ruler/scale bar region at image edges.
-        
+
         Rulers typically have high-contrast tick marks and appear at edges.
+
+        Historical bug: a fixed 50 px margin covered ~22% of each dimension
+        on small (~230 px) images, and the bright mat rim tripped the
+        contrast test in ALL four edge strips — the whole perimeter (~56%
+        of the image) was marked as ruler, starving the background fit.
+        Fixes: margin is scaled to the image, and mat-class (bright blob)
+        pixels are excluded from the contrast statistics.
         """
         h, w = gray.shape
         ruler_mask = np.zeros((h, w), dtype=bool)
-        
-        margin = self.ruler_edge_margin
-        
+
+        # Scale margin to image size: never more than 8% of the short side.
+        margin = min(self.ruler_edge_margin, max(5, int(0.08 * min(h, w))))
+
         # Check each edge for ruler-like patterns
         edges = [
-            ('bottom', gray[-margin:, :], (h - margin, 0)),
-            ('top', gray[:margin, :], (0, 0)),
-            ('left', gray[:, :margin], (0, 0)),
-            ('right', gray[:, -margin:], (0, w - margin)),
+            ('bottom', gray[-margin:, :]),
+            ('top', gray[:margin, :]),
+            ('left', gray[:, :margin]),
+            ('right', gray[:, -margin:]),
         ]
-        
-        for edge_name, edge_region, offset in edges:
+
+        for edge_name, edge_region in edges:
             if self._is_ruler_region(edge_region):
-                y_off, x_off = offset
                 if edge_name == 'bottom':
                     ruler_mask[-margin:, :] = True
                 elif edge_name == 'top':
@@ -284,29 +308,49 @@ class FourRegionDetector:
                 elif edge_name == 'right':
                     ruler_mask[:, -margin:] = True
                 self.logger.info(f"Detected ruler at {edge_name} edge")
-        
+
         return ruler_mask
-    
+
     def _is_ruler_region(self, region: np.ndarray) -> bool:
-        """Check if a region contains ruler-like patterns (high contrast, regular ticks)."""
-        if region.size == 0:
+        """Check if a region contains ruler-like patterns (regular tick marks).
+
+        Discriminates by STRUCTURE, not raw contrast: a ruler strip has many
+        bright/dark transitions per line along its long axis (tick marks),
+        while a mat rim crossing the strip is a single contiguous blob
+        (~2 transitions). The old global-std>40 test could not tell them
+        apart, which caused all four edge strips to fire on small images
+        (the whole perimeter was masked as ruler).
+        """
+        if region.size == 0 or min(region.shape) == 0:
             return False
-        
-        # Rulers have high local contrast (bright ticks on dark background or vice versa)
-        local_std = np.std(region)
-        
-        # Look for high contrast (std > 40 typically indicates tick marks)
-        if local_std > 40:
-            return True
-        
-        # Also check for very bright or very dark uniform regions (white/black ruler background)
-        mean_intensity = np.mean(region)
-        if mean_intensity > 220 or mean_intensity < 35:
-            # Check if there's internal structure (ticks)
-            if local_std > 20:
-                return True
-        
-        return False
+
+        u8 = np.clip(region, 0, 255).astype(np.uint8)
+        _, binary = cv2.threshold(u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        bright = binary > 0
+
+        # Nearly uniform strip (all background or all mat): not a ruler.
+        # Lower bound is small because a thin tick comb at the extreme edge
+        # occupies only a few rows of the strip.
+        bright_frac = float(bright.mean())
+        if not (0.02 < bright_frac < 0.98):
+            return False
+
+        # Require real intensity separation between the two classes,
+        # otherwise Otsu is just amplifying background noise.
+        contrast = float(u8[bright].mean()) - float(u8[~bright].mean())
+        if contrast < 40:
+            return False
+
+        # Count bright/dark transitions per line along the strip's long axis.
+        # 90th percentile (not median): a thin tick comb fills only a few
+        # lines of the strip, but those lines carry dozens of transitions.
+        axis = 1 if region.shape[1] >= region.shape[0] else 0
+        transitions = np.abs(np.diff(bright.astype(np.int8), axis=axis)).sum(axis=axis)
+        p90_transitions = float(np.percentile(transitions, 90))
+
+        # Measured separation on the 30-image sample set: real rulers score
+        # 22-108, mat rims / labels / glare score 0-16.
+        return p90_transitions >= 20.0
     
     def _detect_mat_region(
         self,

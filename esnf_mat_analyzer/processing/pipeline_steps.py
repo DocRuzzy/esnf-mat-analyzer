@@ -87,7 +87,8 @@ def load_and_convert_grayscale(image_path: str) -> StepResult:
 
 def detect_regions(
     grayscale: np.ndarray,
-    roi_mask: Optional[np.ndarray] = None
+    roi_mask: Optional[np.ndarray] = None,
+    ruler_mask: Optional[np.ndarray] = None
 ) -> StepResult:
     """
     Step 2: Detect four regions (background, gel, mat, ruler).
@@ -95,6 +96,10 @@ def detect_regions(
     Args:
         grayscale: Grayscale image (from step 1)
         roi_mask: Optional ROI mask to restrict detection
+        ruler_mask: Optional pre-computed tight ruler mask (e.g. from
+            RulerDetector's Hough-based detection). When provided it is
+            used as-is, bypassing FourRegionDetector's edge-strip
+            heuristic — preferred whenever scale detection has already run.
 
     Returns:
         StepResult with:
@@ -109,7 +114,7 @@ def detect_regions(
             ruler_detection_enabled=True,
         )
 
-        result = detector.detect(grayscale, roi_mask=roi_mask)
+        result = detector.detect(grayscale, roi_mask=roi_mask, ruler_mask=ruler_mask)
 
         # Create visualization overlay
         display = detector.visualize_regions(grayscale, result, alpha=0.4)
