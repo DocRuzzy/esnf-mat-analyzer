@@ -474,12 +474,19 @@ class FourRegionDetector:
         """
         Radial gel detection: cast rays from the mat centroid.
 
-        For each angle, start at the mat's outer edge and walk outward.
-        Gel continues while pixels stay below an adaptive threshold placed
-        midway between measured gel darkness and background brightness;
-        the ray stops once intensity returns to background level. The
-        per-angle outer radii are median-smoothed (bridges specular glints
-        on the wet gel) and filled into a closed annulus.
+        The gel's outer boundary is found as a GLOBALLY OPTIMAL closed
+        curve in polar (thickness) space via dynamic programming: unwrap
+        the band beyond the mat edge into a thickness-by-angle matrix and
+        find the continuous cyclic path that maximises dark-to-light edge
+        strength (with the outside matching each angle's LOCAL background)
+        under a smoothness constraint of +-1 px thickness per 0.5 degree.
+
+        Per-ray thresholding cannot solve this: independent rays trade
+        under-detection (thin gel barely below background, gel over deep
+        shadow) against over-detection (dark smudges beyond the ring), and
+        post-hoc smoothing shaves true boundary along with the noise. The
+        DP boundary uses edge structure instead of absolute intensity, so
+        one consistent smooth edge beats any collection of local smudges.
 
         Returns None if the geometry is unusable (no mat, degenerate rays),
         signalling the caller to fall back to the threshold method.
@@ -507,17 +514,13 @@ class FourRegionDetector:
         max_r = int(np.hypot(h, w))
         gray_f = gray.astype(np.float32)
 
-        # Illumination varies strongly across these photos (shadowed side can
-        # be 20+ DN darker than the global background mean), and the wet gel
-        # carries bright specular glints right at the mat edge. So each ray
-        # uses its own LOCAL background (sampled beyond the maximum gel
-        # extent) and marks gel out to the LAST deep-dark sample — glints
-        # are bridged instead of terminating the walk.
-        min_contrast = 15.0  # DN; below this a ray has no discernible gel
-
-        r_outer = np.zeros(n_angles, dtype=np.float64)
+        # --- Per-angle mat edge (end of the CONTIGUOUS mat body) ---
+        # Spilled mat outside the gel ring must not start the band beyond
+        # the gel; the spill stays classified as mat because the mat mask
+        # is subtracted from the annulus at the end. Small gaps (<=3 px,
+        # antialiasing) do not break the run.
         r_mat_edge = np.zeros(n_angles, dtype=np.float64)
-        bg_locals = []
+        valid_ray = np.zeros(n_angles, dtype=bool)
         for i in range(n_angles):
             samples = np.arange(0, max_r)
             px = (cx + samples * cos_a[i]).astype(int)
@@ -526,94 +529,138 @@ class FourRegionDetector:
             px, py, samples = px[valid], py[valid], samples[valid]
             on_mat = mat_mask[py, px]
             if not on_mat.any():
-                r_mat_edge[i] = 0.0
-                r_outer[i] = 0.0
                 continue
-            # Walk from the end of the CONTIGUOUS mat body, not the
-            # outermost mat pixel: spilled mat outside the gel ring would
-            # otherwise start the walk beyond the gel and hide it. The
-            # spill stays classified as mat because the mat mask is
-            # subtracted from the annulus at the end. Small gaps (<=3 px,
-            # antialiasing) do not break the run.
             on_idx = np.nonzero(on_mat)[0]
             gap_pos = np.nonzero(np.diff(on_idx) > 3)[0]
             edge_idx = int(on_idx[gap_pos[0]]) if gap_pos.size else int(on_idx.max())
             r_mat_edge[i] = samples[edge_idx]
-            r_outer[i] = samples[edge_idx]
+            valid_ray[i] = True
 
-            walk_lo = edge_idx + 1
-            walk_hi = min(edge_idx + max_ext, len(samples) - 1)
-            far_hi = min(edge_idx + 2 * max_ext, len(samples) - 1)
-            if walk_hi <= walk_lo or far_hi <= walk_hi + 2:
-                continue
-
-            walk_vals = gray_f[py[walk_lo:walk_hi + 1], px[walk_lo:walk_hi + 1]]
-            far_vals = gray_f[py[walk_hi + 1:far_hi + 1], px[walk_hi + 1:far_hi + 1]]
-            bg_local = float(np.median(far_vals))
-            bg_locals.append(bg_local)
-            gel_dark = float(np.percentile(walk_vals, 5))
-            if bg_local - gel_dark < min_contrast:
-                # Gel and background are indistinguishable by intensity in
-                # this direction (e.g. gel over deep shadow). Mark unknown;
-                # the radius is interpolated from angular neighbours below —
-                # the gel annulus is spatially continuous.
-                r_outer[i] = np.nan
-                continue
-
-            # Gel cut: meaningfully below the local background. The outer
-            # half of the gel ring can sit only 10-20 DN below background
-            # (thin translucent gel), so the cut is placed at 65% of the
-            # gel-to-background contrast — still strictly below bg_local,
-            # which keeps sustained background/shadow runs excluded.
-            deep_thr = gel_dark + 0.65 * (bg_local - gel_dark)
-            deep_idx = np.nonzero(walk_vals <= deep_thr)[0]
-            if deep_idx.size:
-                r_outer[i] = samples[walk_lo + int(deep_idx.max())]
-
-        if not np.any(r_mat_edge > 0):
+        if not valid_ray.any():
             return None
 
-        # Interpolate unknown (NaN) radii from angular neighbours with
-        # circular wrap-around: directions where gel and shadow were
-        # indistinguishable inherit the boundary from adjacent directions.
-        nan_mask = np.isnan(r_outer)
-        if nan_mask.all():
+        # --- Unwrap the band beyond the mat edge into thickness space ---
+        # M[t, i] = intensity at radius r_mat_edge(i) + 1 + t along ray i.
+        # Rows 0..T-1 are the walkable gel band; rows T..T+F-1 are the far
+        # zone giving each angle its LOCAL background (illumination varies
+        # 20+ DN across these photos; a global reference cannot work).
+        T = max_ext
+        F = max_ext
+        t_idx = np.arange(T + F, dtype=np.float64)
+        rr = r_mat_edge[None, :] + 1.0 + t_idx[:, None]
+        sx = np.rint(cx + rr * cos_a[None, :]).astype(int)
+        sy = np.rint(cy + rr * sin_a[None, :]).astype(int)
+        inb = (sx >= 0) & (sx < w) & (sy >= 0) & (sy < h)
+        M = np.full(rr.shape, np.nan, dtype=np.float32)
+        M[inb] = gray_f[sy[inb], sx[inb]]
+        M[:, ~valid_ray] = np.nan
+
+        import warnings as _warnings
+        with np.errstate(invalid='ignore'), _warnings.catch_warnings():
+            _warnings.simplefilter('ignore', RuntimeWarning)
+            bg_local = np.nanmedian(M[T:, :], axis=0)
+        finite_bg = bg_local[np.isfinite(bg_local)]
+        if finite_bg.size == 0:
             return None
-        # Angular coverage of INDEPENDENT gel findings (pre-interpolation)
-        with np.errstate(invalid='ignore'):
-            independent_found = (~nan_mask) & (r_outer > r_mat_edge + 1.0) & (r_mat_edge > 0)
+        bg_local = np.where(np.isfinite(bg_local), bg_local,
+                            float(np.median(finite_bg)))
+
+        # --- Edge cost: boundary at thickness b (gel occupies t < b) ---
+        # Reward a dark->light step whose OUTSIDE matches the local
+        # background: (mean_out - mean_in) - 0.5 * |mean_out - bg_local|.
+        # The consistency term keeps the boundary from settling at glint
+        # interiors or bright spill arcs unless the far side truly is
+        # background. b = 0 is the neutral "no gel here" option.
+        # (An integral darkness-deficit cost was tried and rejected: it is
+        # unstable to 2-3 DN errors in the local background estimate.)
+        C = np.full((T + 1, n_angles), -1e5, dtype=np.float64)
+        C[0, :] = 2.0
+        with np.errstate(invalid='ignore'), _warnings.catch_warnings():
+            _warnings.simplefilter('ignore', RuntimeWarning)
+            for b in range(1, T + 1):
+                mean_in = np.nanmean(M[max(0, b - 4):b, :], axis=0)
+                mean_out = np.nanmean(M[b:b + 4, :], axis=0)
+                c = (mean_out - mean_in) - 0.5 * np.abs(mean_out - bg_local)
+                c[~np.isfinite(c)] = -1e5
+                C[b, :] = c
+        C[:, ~valid_ray] = 0.0  # path glides through unusable directions
+
+        # --- Cyclic DP: continuous closed boundary, |Δthickness| <= 1 per
+        # 0.5° step. Run over doubled angles and keep the middle-aligned
+        # window so the seam of the linear recursion cannot bias the
+        # cyclic result.
+        C2 = np.concatenate([C, C], axis=1)
+        n2 = 2 * n_angles
+        P = np.zeros((T + 1, n2), dtype=np.int8)
+        D = C2[:, 0].copy()
+        for j in range(1, n2):
+            from_up = np.concatenate([[-np.inf], D[:-1]])   # from b-1
+            from_dn = np.concatenate([D[1:], [-np.inf]])    # from b+1
+            best = np.maximum(np.maximum(D, from_up), from_dn)
+            step = np.zeros(T + 1, dtype=np.int8)
+            step[from_up == best] = -1
+            step[from_dn == best] = 1
+            step[D == best] = 0  # prefer staying level on ties
+            P[:, j] = step
+            D = C2[:, j] + best
+
+        b = int(np.argmax(D))
+        path = np.empty(n2, dtype=np.int32)
+        path[-1] = b
+        for j in range(n2 - 1, 0, -1):
+            b = b + int(P[b, j])
+            path[j - 1] = b
+
+        thickness = np.empty(n_angles, dtype=np.float64)
+        start = n_angles // 2
+        for k in range(n_angles):
+            j = start + k
+            thickness[j % n_angles] = path[j]
+
+        # Angular coverage of directions where the DP found a real gel band
+        independent_found = valid_ray & (thickness >= 2)
         coverage = float(np.mean(independent_found))
 
-        # Ring-thickness cap: the gel ring's thickness varies smoothly, but
-        # deep-dark smudges/shadow beyond the true ring can drag single
-        # rays far out (over-detection reported on the brightly lit side).
-        # Cap each ray's thickness at 1.6x the median found thickness.
-        if independent_found.any():
-            thickness = r_outer - r_mat_edge
-            t_med = float(np.median(thickness[independent_found]))
-            t_cap = 1.6 * t_med + 2.0
-            with np.errstate(invalid='ignore'):
-                over = independent_found & (thickness > t_cap)
-            r_outer[over] = r_mat_edge[over] + t_cap
-        if nan_mask.any():
-            idx = np.arange(n_angles)
-            valid = ~nan_mask
-            r_outer = np.interp(
-                idx, idx[valid], r_outer[valid],
-                period=n_angles
-            )
-
-        # Circular smoothing bridges glints and single-ray spikes. The 30th
-        # percentile (not the median) biases toward the SMALLER radius, so
-        # lumpy outward protrusions from background smudges are shaved off
-        # while consistent ring stretches are preserved.
-        k = 18
-        padded = np.concatenate([r_outer[-k:], r_outer, r_outer[:k]])
-        smoothed = np.array([
-            np.percentile(padded[i:i + 2 * k + 1], 30) for i in range(n_angles)
+        # --- Bounded outward refinement: faint gel rim ---
+        # The edge DP anchors on the strongest boundary, which misses the
+        # gel's outer rolled rim (user-verified on real samples): a band
+        # beyond the dark gel that DEVIATES from background by only a few
+        # DN — darker where matte, BRIGHTER where the wet surface throws
+        # specular sheen, often separated from the dark band by a glint
+        # line. Evidence is therefore |deviation| >= 4 DN (3-px smoothed,
+        # two-sample tolerance); true background hovers within the noise
+        # band. Extension is hard-capped and median-smoothed across angles
+        # so single-ray flukes and radial illumination drift stay bounded.
+        max_rim_ext = 8
+        kernel3 = np.ones(3) / 3.0
+        ext = np.zeros(n_angles, dtype=np.float64)
+        for i in range(n_angles):
+            b0 = int(thickness[i])
+            if not independent_found[i] or b0 >= T - 1:
+                continue
+            prof = np.convolve(np.nan_to_num(M[:, i], nan=bg_local[i]),
+                               kernel3, mode='same')
+            miss = 0
+            t = b0
+            last_evidence = b0
+            while t < min(T + F - 2, b0 + max_rim_ext):
+                if abs(bg_local[i] - prof[t]) >= 4.0:
+                    miss = 0
+                    last_evidence = t + 1
+                    t += 1
+                else:
+                    miss += 1
+                    if miss > 2:
+                        break
+                    t += 1
+            ext[i] = max(0, last_evidence - b0)
+        k_ext = 10
+        padded = np.concatenate([ext[-k_ext:], ext, ext[:k_ext]])
+        ext = np.array([
+            np.median(padded[i:i + 2 * k_ext + 1]) for i in range(n_angles)
         ])
-        # Never let smoothing pull the boundary inside the mat edge
-        smoothed = np.maximum(smoothed, r_mat_edge)
+
+        smoothed = r_mat_edge + thickness + np.where(independent_found, ext, 0.0)
 
         # Fill the outer boundary polygon, then remove the mat -> annulus
         pts = np.stack([
