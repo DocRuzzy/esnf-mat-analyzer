@@ -395,25 +395,45 @@ class FourRegionDetector:
             self.logger.warning("No mat contours found")
             return np.zeros((h, w), dtype=bool), None
         
-        # Find the largest contour within area constraints
+        # Find the best mat candidate within area constraints.
+        # Pure largest-area selection fails when a bright glare band in the
+        # background outgrows the mat disc (e.g. TCD10-GPED3.0-1: full-width
+        # top band = 9134 px vs disc = 8677 px). The mat is compact, roughly
+        # circular, and near the image center, so score candidates by
+        # area x circularity x centrality instead of area alone.
         image_area = h * w
         valid_contours = [
             c for c in contours
             if self.min_mat_area_ratio * image_area <= cv2.contourArea(c) <= self.max_mat_area_ratio * image_area
         ]
-        
+
         if not valid_contours:
             # Fall back to largest contour
             valid_contours = [max(contours, key=cv2.contourArea)]
-        
-        largest_contour = max(valid_contours, key=cv2.contourArea)
-        
+
+        def _mat_score(contour):
+            area = cv2.contourArea(contour)
+            if area <= 0:
+                return 0.0
+            perimeter = max(cv2.arcLength(contour, True), 1.0)
+            circularity = min(4.0 * np.pi * area / (perimeter ** 2), 1.0)
+            m = cv2.moments(contour)
+            if m['m00'] > 0:
+                cx_c, cy_c = m['m10'] / m['m00'], m['m01'] / m['m00']
+            else:
+                cx_c, cy_c = w / 2.0, h / 2.0
+            dist = np.hypot(cx_c - w / 2.0, cy_c - h / 2.0)
+            centrality = max(0.0, 1.0 - dist / (0.5 * np.hypot(h, w)))
+            return area * circularity * centrality
+
+        largest_contour = max(valid_contours, key=_mat_score)
+
         # Create mask from contour
         mat_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.drawContours(mat_mask, [largest_contour], -1, 1, thickness=cv2.FILLED)
-        
+
         return mat_mask.astype(bool), largest_contour
-    
+
     def _detect_gel_region_improved(
         self,
         gray: np.ndarray,
@@ -422,11 +442,170 @@ class FourRegionDetector:
     ) -> Tuple[np.ndarray, Optional[np.ndarray], bool]:
         """
         Detect gel region - the dark ring around mat that is DARKER than background.
-        
-        Strategy:
-        1. Dilate mat to get search region
-        2. In the ring around mat, find pixels darker than the outer background
-        3. The gel is the dark ring, background is everything else outside
+
+        Primary strategy: radial ray-casting (_detect_gel_region_radial) —
+        the gel is geometrically an annulus hugging the mat, so walk outward
+        from the mat edge per angle until intensity returns to background
+        level. This includes thin gel that is not much darker than the
+        background AND stops before diffuse shadows further out — both
+        failure modes of the pure darkness-threshold approach below, which
+        is kept as fallback.
+        """
+        radial = self._detect_gel_region_radial(gray, mat_mask, analysis_mask)
+        if radial is not None:
+            return radial
+        self.logger.info("Radial gel detection unavailable; falling back to threshold method")
+        return self._detect_gel_region_threshold(gray, mat_mask, analysis_mask)
+
+    def _detect_gel_region_radial(
+        self,
+        gray: np.ndarray,
+        mat_mask: np.ndarray,
+        analysis_mask: np.ndarray
+    ) -> Optional[Tuple[np.ndarray, Optional[np.ndarray], bool]]:
+        """
+        Radial gel detection: cast rays from the mat centroid.
+
+        For each angle, start at the mat's outer edge and walk outward.
+        Gel continues while pixels stay below an adaptive threshold placed
+        midway between measured gel darkness and background brightness;
+        the ray stops once intensity returns to background level. The
+        per-angle outer radii are median-smoothed (bridges specular glints
+        on the wet gel) and filled into a closed annulus.
+
+        Returns None if the geometry is unusable (no mat, degenerate rays),
+        signalling the caller to fall back to the threshold method.
+        """
+        h, w = gray.shape
+        if not np.any(mat_mask):
+            return None
+
+        ys, xs = np.nonzero(mat_mask)
+        cy, cx = float(ys.mean()), float(xs.mean())
+        r_mat_typ = float(np.sqrt(mat_mask.sum() / np.pi))
+        max_ext = max(10, int(0.45 * r_mat_typ))
+
+        # Sanity: there must be usable area beyond the possible gel band
+        dilate_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (2 * max_ext + 1, 2 * max_ext + 1)
+        )
+        mat_dilated = cv2.dilate(mat_mask.astype(np.uint8), dilate_kernel).astype(bool)
+        if np.sum(analysis_mask & ~mat_dilated) < 100:
+            return None
+
+        n_angles = 720
+        angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
+        cos_a, sin_a = np.cos(angles), np.sin(angles)
+        max_r = int(np.hypot(h, w))
+        gray_f = gray.astype(np.float32)
+
+        # Illumination varies strongly across these photos (shadowed side can
+        # be 20+ DN darker than the global background mean), and the wet gel
+        # carries bright specular glints right at the mat edge. So each ray
+        # uses its own LOCAL background (sampled beyond the maximum gel
+        # extent) and marks gel out to the LAST deep-dark sample — glints
+        # are bridged instead of terminating the walk.
+        min_contrast = 15.0  # DN; below this a ray has no discernible gel
+
+        r_outer = np.zeros(n_angles, dtype=np.float64)
+        r_mat_edge = np.zeros(n_angles, dtype=np.float64)
+        for i in range(n_angles):
+            samples = np.arange(0, max_r)
+            px = (cx + samples * cos_a[i]).astype(int)
+            py = (cy + samples * sin_a[i]).astype(int)
+            valid = (px >= 0) & (px < w) & (py >= 0) & (py < h)
+            px, py, samples = px[valid], py[valid], samples[valid]
+            on_mat = mat_mask[py, px]
+            if not on_mat.any():
+                r_mat_edge[i] = 0.0
+                r_outer[i] = 0.0
+                continue
+            edge_idx = int(np.max(np.nonzero(on_mat)[0]))
+            r_mat_edge[i] = samples[edge_idx]
+            r_outer[i] = samples[edge_idx]
+
+            walk_lo = edge_idx + 1
+            walk_hi = min(edge_idx + max_ext, len(samples) - 1)
+            far_hi = min(edge_idx + 2 * max_ext, len(samples) - 1)
+            if walk_hi <= walk_lo or far_hi <= walk_hi + 2:
+                continue
+
+            walk_vals = gray_f[py[walk_lo:walk_hi + 1], px[walk_lo:walk_hi + 1]]
+            far_vals = gray_f[py[walk_hi + 1:far_hi + 1], px[walk_hi + 1:far_hi + 1]]
+            bg_local = float(np.median(far_vals))
+            gel_dark = float(np.percentile(walk_vals, 5))
+            if bg_local - gel_dark < min_contrast:
+                continue  # no gel contrast in this direction
+
+            # Deep-dark cut: closer to gel darkness than to local background
+            deep_thr = gel_dark + 0.35 * (bg_local - gel_dark)
+            deep_idx = np.nonzero(walk_vals <= deep_thr)[0]
+            if deep_idx.size:
+                r_outer[i] = samples[walk_lo + int(deep_idx.max())]
+
+        if not np.any(r_mat_edge > 0):
+            return None
+
+        # Circular median smoothing bridges glints and single-ray spikes
+        k = 15
+        padded = np.concatenate([r_outer[-k:], r_outer, r_outer[:k]])
+        smoothed = np.array([
+            np.median(padded[i:i + 2 * k + 1]) for i in range(n_angles)
+        ])
+        # Never let smoothing pull the boundary inside the mat edge
+        smoothed = np.maximum(smoothed, r_mat_edge)
+
+        # Fill the outer boundary polygon, then remove the mat -> annulus
+        pts = np.stack([
+            cx + smoothed * cos_a, cy + smoothed * sin_a
+        ], axis=1).astype(np.int32)
+        filled = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(filled, [pts], 1)
+        gel_mask = filled.astype(bool) & ~mat_mask & analysis_mask
+
+        # Light cleanup only (geometry already constrains the shape)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        gel_mask = cv2.morphologyEx(
+            gel_mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel
+        ).astype(bool) & ~mat_mask & analysis_mask
+
+        gel_area = int(gel_mask.sum())
+        if gel_area < 0.01 * mat_mask.sum():
+            self.logger.info(f"Radial gel area too small ({gel_area} px)")
+            return np.zeros((h, w), dtype=bool), None, False
+
+        gel_intensity = float(np.mean(gray[gel_mask]))
+        bg_intensity = float(np.mean(gray[analysis_mask & ~mat_dilated]))
+        if gel_intensity >= bg_intensity:
+            self.logger.warning(
+                f"Radial 'gel' ({gel_intensity:.1f}) not darker than background "
+                f"({bg_intensity:.1f}); rejecting"
+            )
+            return np.zeros((h, w), dtype=bool), None, False
+
+        contours, _ = cv2.findContours(
+            gel_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        gel_contour = max(contours, key=cv2.contourArea) if contours else None
+
+        self.logger.info(
+            f"Radial gel detection: {gel_area} px, intensity={gel_intensity:.1f} "
+            f"(background={bg_intensity:.1f})"
+        )
+        return gel_mask, gel_contour, True
+
+    def _detect_gel_region_threshold(
+        self,
+        gray: np.ndarray,
+        mat_mask: np.ndarray,
+        analysis_mask: np.ndarray
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], bool]:
+        """
+        Fallback gel detection - dark-pixel threshold in a dilated ring.
+
+        Known failure modes (why radial is preferred): includes diffuse
+        shadows that are darker than background but are not gel, and
+        misses thin gel that is not far enough below the threshold.
         """
         h, w = gray.shape
         
